@@ -1,0 +1,9 @@
+# Firmware and external data are reference material.
+/jci/
+/node_modules/
+
+# User-editable runtime state.
+/server/data/user-settings.json
+
+# Keep the dependency lock file package-manager generated.
+/package-lock.json
