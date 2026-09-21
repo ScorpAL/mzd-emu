@@ -21,6 +21,8 @@ It works by running two small local servers:
   answering the GUI's requests (screen navigation, status bar, settings,
   etc.) so the interface behaves like it does in the car.
 
+https://github.com/user-attachments/assets/ef45d208-f471-477d-8029-747deec10643
+
 ## Installation
 
 1. Install Node.js 20.19 or newer.
