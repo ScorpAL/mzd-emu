@@ -26,7 +26,8 @@ https://github.com/user-attachments/assets/ef45d208-f471-477d-8029-747deec10643
 ## Installation
 
 1. Install [Node.js](https://nodejs.org) 20.19 or newer.
-2. Clone this repository.
+2. Clone this repository, or download and extract the ZIP from the
+   [latest release](https://github.com/ScorpAL/mzd-emu/releases/latest).
 3. Install dependencies from the project root:
 
     ```bash
