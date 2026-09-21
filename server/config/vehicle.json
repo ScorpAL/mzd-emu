@@ -1,0 +1,15 @@
+{
+    "region": "Region_Europe",
+    "destinationCode": "SETTINGS_Destination_EU",
+    "vehicleType": "SETTINGS_VehicleModelType_J78A",
+    "hudType": "WHUD_color",
+    "navigationSdCard": "On",
+    "bose": "On",
+    "appleCarPlayAvailable": "On",
+    "appleWirelessCarPlayAvailable": "Off",
+    "appleCarPlayConnection": "Off",
+    "appleCarPlaySettings": "Off",
+    "androidAutoAvailable": "On",
+    "androidAutoConnection": "Off",
+    "androidAutoSettings": "Off"
+}

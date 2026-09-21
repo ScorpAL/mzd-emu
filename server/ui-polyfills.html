@@ -1,0 +1,225 @@
+<!-- Browser compatibility shims for the firmware GUI. -->
+<script>
+    window.opera = window.opera || {
+        version: function () {
+            return '12.10';
+        }
+    };
+</script>
+
+<script>
+    if (!('length' in ArrayBuffer.prototype)) {
+        Object.defineProperty(ArrayBuffer.prototype, 'length', {
+            get: function () {
+                return this.byteLength;
+            }
+        });
+    }
+</script>
+
+<script>
+    if (!('currentStyle' in Element.prototype)) {
+        Object.defineProperty(Element.prototype, 'currentStyle', {
+            get: function () {
+                return window.getComputedStyle(this);
+            }
+        });
+    }
+</script>
+
+<style>
+    @font-face {
+        font-family: 'Tipperary';
+        src: url('../fonts/Tipperary.ttf') format('truetype');
+        font-weight: normal;
+        font-style: normal;
+    }
+    @font-face {
+        font-family: 'Tipperary';
+        src: url('../fonts/TipperaryBold.ttf') format('truetype');
+        font-weight: bold;
+        font-style: normal;
+    }
+    @font-face {
+        font-family: 'Tipperary';
+        src: url('../fonts/TipperaryItalic.ttf') format('truetype');
+        font-weight: normal;
+        font-style: italic;
+    }
+    @font-face {
+        font-family: 'Tipperary';
+        src: url('../fonts/TipperaryBoldItalic.ttf') format('truetype');
+        font-weight: bold;
+        font-style: italic;
+    }
+    @font-face {
+        font-family: 'Tipperary Semibold';
+        src: url('../fonts/TipperarySemibold.ttf') format('truetype');
+        font-style: normal;
+    }
+    @font-face {
+        font-family: 'Tipperary Semibold';
+        src: url('../fonts/TipperarySemiboldItalic.ttf') format('truetype');
+        font-style: italic;
+    }
+    @font-face {
+        font-family: 'TipperarySemibold';
+        src: url('../fonts/TipperarySemibold.ttf') format('truetype');
+        font-style: normal;
+    }
+    @font-face {
+        font-family: 'TipperarySemibold';
+        src: url('../fonts/TipperarySemiboldItalic.ttf') format('truetype');
+        font-style: italic;
+    }
+</style>
+<link rel="preload" href="../fonts/Tipperary.ttf" as="font" type="font/ttf" crossorigin />
+<link rel="preload" href="../fonts/TipperarySemibold.ttf" as="font" type="font/ttf" crossorigin />
+
+<!-- Relay standard animation events to the names used by the firmware. -->
+<script>
+    (function () {
+        function relayAsLegacyOperaEvent(standardType, legacyOperaType) {
+            document.addEventListener(
+                standardType,
+                function (nativeEvt) {
+                    const legacyEvt = new Event(legacyOperaType, {
+                        bubbles: true,
+                        cancelable: true
+                    });
+                    nativeEvt.target.dispatchEvent(legacyEvt);
+                },
+                true
+            );
+        }
+        relayAsLegacyOperaEvent('transitionend', 'OTransitionEnd');
+        relayAsLegacyOperaEvent('animationend', 'OAnimationEnd');
+    })();
+</script>
+
+<!-- Copy Opera CSS properties to standard CSS properties. -->
+<script>
+    (function () {
+        const OPERA_PROP_RE =
+            /(-o-(?:transition(?:-property|-duration|-timing-function|-delay)?|transform(?:-origin)?))\s*:\s*([^;{}]+);/g;
+
+        function duplicateOperaPropsAsStandard(cssText) {
+            return cssText.replace(OPERA_PROP_RE, function (fullMatch, operaProp, value) {
+                const standardProp = operaProp.replace('-o-', '');
+                return fullMatch + '\n  ' + standardProp + ': ' + value.trim() + ';';
+            });
+        }
+
+        function absolutizeUrls(cssText, sheetUrl) {
+            return cssText.replace(
+                /url\(\s*(['"]?)([^'")]+)\1\s*\)/g,
+                function (fullMatch, quote, url) {
+                    if (/^(data:|[a-z]+:\/\/)/i.test(url)) {
+                        return fullMatch;
+                    }
+                    return 'url(' + quote + new URL(url, sheetUrl).href + quote + ')';
+                }
+            );
+        }
+
+        function patchStylesheetLink(linkEl) {
+            if (linkEl.dataset.oTransitionPatched) {
+                return;
+            }
+            linkEl.dataset.oTransitionPatched = 'true';
+
+            const originalUrl = linkEl.href;
+            const xhr = new XMLHttpRequest();
+            xhr.open('GET', originalUrl, false);
+            xhr.send(null);
+            if (xhr.status !== 200 && xhr.status !== 0) {
+                return;
+            }
+
+            let patchedCss = absolutizeUrls(xhr.responseText, originalUrl);
+            patchedCss = duplicateOperaPropsAsStandard(patchedCss);
+            const blob = new Blob([patchedCss], { type: 'text/css' });
+            linkEl.href = URL.createObjectURL(blob);
+        }
+
+        function patchAllCurrentStylesheetLinks() {
+            const links = document.querySelectorAll("link[rel='stylesheet']");
+            for (let i = 0; i < links.length; i++) {
+                patchStylesheetLink(links[i]);
+            }
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', patchAllCurrentStylesheetLinks);
+        } else {
+            patchAllCurrentStylesheetLinks();
+        }
+
+        new MutationObserver(function (mutations) {
+            mutations.forEach(function (mutation) {
+                for (let i = 0; i < mutation.addedNodes.length; i++) {
+                    const node = mutation.addedNodes[i];
+                    if (node.tagName === 'LINK' && node.rel === 'stylesheet') {
+                        patchStylesheetLink(node);
+                    }
+                }
+            });
+        }).observe(document.head, { childList: true });
+    })();
+</script>
+
+<!-- Use the real viewport height when enabling detail-view scrolling. -->
+<script>
+    (function () {
+        function patchScrollDetailCtrl() {
+            if (
+                typeof ScrollDetailCtrl === 'undefined' ||
+                !ScrollDetailCtrl.prototype._setScrollIndicator
+            ) {
+                return false;
+            }
+
+            if (ScrollDetailCtrl.prototype._setScrollIndicator.__mzdOverflowFixApplied) {
+                return true;
+            }
+
+            const originalSetScrollIndicator = ScrollDetailCtrl.prototype._setScrollIndicator;
+
+            function patchedSetScrollIndicator() {
+                originalSetScrollIndicator.apply(this, arguments);
+
+                if (!this._scrollDetailWrapper || !this._scrollDetailMask) {
+                    return;
+                }
+
+                const contentHeight = this._scrollDetailWrapper.scrollHeight;
+                const viewportHeight = this._scrollDetailMask.clientHeight;
+                const overflowing = contentHeight > viewportHeight;
+
+                this._maxScrollY = overflowing ? viewportHeight - contentHeight : 0;
+                this._scrollDisabled = !overflowing;
+
+                if (
+                    this.properties.showScrollIndicator &&
+                    this._scrollIndicator &&
+                    this._scrollIndicatorWrapper
+                ) {
+                    this._scrollIndicator.style.opacity = overflowing ? 1 : 0;
+                    this._scrollIndicatorWrapper.style.opacity = overflowing ? 1 : 0;
+                }
+            }
+
+            patchedSetScrollIndicator.__mzdOverflowFixApplied = true;
+            ScrollDetailCtrl.prototype._setScrollIndicator = patchedSetScrollIndicator;
+            return true;
+        }
+
+        if (!patchScrollDetailCtrl()) {
+            const pollId = setInterval(function () {
+                if (patchScrollDetailCtrl()) {
+                    clearInterval(pollId);
+                }
+            }, 50);
+        }
+    })();
+</script>
