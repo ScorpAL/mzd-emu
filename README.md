@@ -4,6 +4,10 @@ This project lets you run the Mazda Connect (JCI-IHU) head unit's UI on your
 own computer, in a regular modern browser such as Chrome — no head unit or
 special hardware required. It is based on firmware version **74.00.324 EU N**.
 
+<p align="center">
+  <img src="docs/home.png" alt="mzd-emu running the Mazda Connect home screen in a browser">
+</p>
+
 > [!WARNING]
 > This is an emulator, not the real head unit software: not every function
 > is implemented, and some behavior may be incomplete or inaccurate compared
