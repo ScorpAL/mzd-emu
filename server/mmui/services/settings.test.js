@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const path = require('node:path');
 
 const settings = require('./settings');
 
@@ -28,24 +29,21 @@ test('currentLanguageId falls back to US English when nothing was ever saved', (
     assert.ok(settings.currentLanguageId);
 });
 
-test('saveUserSettings persists the current in-memory settings to data/user-settings.json', () => {
-    const userSettingsFile = settings.VEHICLE_CONFIG_FILE.replace(
-        'config/vehicle.json',
-        'data/user-settings.json'
-    );
-    const originalFileContents = fs.readFileSync(userSettingsFile, 'utf8');
-    const originalTimeFormat = settings.currentSettings.timeFormat;
+test('the tests never use the real data/user-settings.json', () => {
+    const realFile = path.join(__dirname, '..', '..', 'data', 'user-settings.json');
+    assert.notEqual(settings.USER_SETTINGS_FILE, realFile);
+});
 
+test('saveUserSettings persists the current in-memory settings atomically', () => {
+    const originalTimeFormat = settings.currentSettings.timeFormat;
     try {
         settings.currentSettings.timeFormat = 'hrs24';
         settings.saveUserSettings();
 
-        const saved = JSON.parse(fs.readFileSync(userSettingsFile, 'utf8'));
+        const saved = JSON.parse(fs.readFileSync(settings.USER_SETTINGS_FILE, 'utf8'));
         assert.equal(saved.timeFormat, 'hrs24');
+        assert.equal(fs.existsSync(settings.USER_SETTINGS_FILE + '.tmp'), false);
     } finally {
-        // Restore whatever was on disk before this test ran (this file is a
-        // real, gitignored, user-editable artifact - never leave it mutated).
-        fs.writeFileSync(userSettingsFile, originalFileContents);
         settings.currentSettings.timeFormat = originalTimeFormat;
     }
 });
