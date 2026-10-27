@@ -3,15 +3,17 @@ const fs = require('fs');
 const path = require('path');
 const logger = require('./logger');
 const runtime = require('./config/runtime.json');
-const { openBrowser } = require('./open-browser');
+const { openBrowser } = require('./launcher/open-browser');
 
 const CONFIG = {
     port: runtime.uiPort,
     docRoot: path.join(__dirname, '..'),
     guiPath: '/jci/gui/index.html',
     injectIntoPaths: ['/jci/gui/index.html'],
-    polyfillsFile: path.join(__dirname, 'ui-polyfills.html'),
-    injectBeforeMarker: '</head>'
+    polyfillsFile: path.join(__dirname, 'browser', 'ui-polyfills.html'),
+    injectBeforeMarker: '</head>',
+    // Added to the injected HTML only when runtime.json enables the emulator controls.
+    controlsScript: '<script src="/server/browser/ui-controls.js"></script>\n'
 };
 
 const MIME_TYPES = {
@@ -41,7 +43,9 @@ function getContentType(filePath) {
 }
 
 function injectPolyfills(htmlText) {
-    const polyfillSnippet = fs.readFileSync(CONFIG.polyfillsFile, 'utf8');
+    const polyfillSnippet =
+        fs.readFileSync(CONFIG.polyfillsFile, 'utf8') +
+        (runtime.emulatorControls ? CONFIG.controlsScript : '');
     const markerIndex = htmlText.toLowerCase().indexOf(CONFIG.injectBeforeMarker.toLowerCase());
     if (markerIndex === -1) {
         logger.warn(
@@ -136,11 +140,11 @@ function start() {
     const server = createServer();
     server.on('error', (error) => logger.error('ui-server', 'Server error: %s', error.message));
     server.listen(CONFIG.port, function () {
-        logger.info(
+        logger.info('ui-server', 'Serving the GUI on http://localhost:%d/', CONFIG.port);
+        logger.debug(
             'ui-server',
-            'Serving %s on http://localhost:%d/ (injecting %s into %s)',
+            'Document root %s, injecting %s into %s',
             CONFIG.docRoot,
-            CONFIG.port,
             path.basename(CONFIG.polyfillsFile),
             CONFIG.injectIntoPaths.join(', ')
         );

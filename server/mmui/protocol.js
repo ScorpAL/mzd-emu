@@ -1,4 +1,4 @@
-const navigationState = require('./navigationState');
+const navigationState = require('./state/navigationState');
 const logger = require('../logger');
 
 function withSeqByte(jsonStr, seq) {
@@ -28,14 +28,12 @@ const sendContextChange = function (ws, uiaId, ctxtId, params, contextSeq, skipG
         appIdList: [{ id: uiaId }, { id: currAppId }]
     });
     const seqByte = contextSeq;
+    // A screen change is four frames on the wire; the log shows it as one line.
     ws.send(withSeqByte(transitionTrue, seqByte));
-    logger.debug('guiifm', 'Sent transition enabled=true');
     ws.send(withSeqByte(ctxtChgMsg, seqByte));
-    logger.debug('guiifm', 'Sent context change uiaId=%s context=%s', uiaId, ctxtId);
     ws.send(withSeqByte(focusStackMsg, seqByte));
-    logger.debug('guiifm', 'Sent focus stack');
     ws.send(withSeqByte(transitionFalse, seqByte));
-    logger.debug('guiifm', 'Sent transition enabled=false');
+    logger.info('screen', '%s/%s', uiaId, ctxtId);
 
     if (
         !skipGoBackPush &&

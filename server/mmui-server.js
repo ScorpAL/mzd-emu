@@ -1,7 +1,9 @@
 const WebSocketServer = require('ws').Server;
 
 const logger = require('./logger');
-const startup = require('./mmui/startup');
+const startup = require('./mmui/services/startup');
+const temperatureService = require('./mmui/services/temperatureService');
+const { createControlServer } = require('./mmui/controlPanel');
 const handleMmuiEvent = require('./mmui/dispatcher');
 
 const runtime = require('./config/runtime.json');
@@ -9,7 +11,8 @@ const runtime = require('./config/runtime.json');
 const PORTS = {
     guiifm: runtime.guiifmPort,
     appsdk: runtime.appsdkPort,
-    dbapi: runtime.dbapiPort
+    dbapi: runtime.dbapiPort,
+    control: runtime.controlPort
 };
 
 function parseMessage(message, scope) {
@@ -23,9 +26,10 @@ function parseMessage(message, scope) {
 
 function attachPassiveEndpoint(server, scope) {
     server.on('connection', (ws) => {
-        logger.success(scope, 'Client connected');
+        // These sockets carry nothing the emulator acts on; only note them for debugging.
+        logger.debug(scope, 'Client connected');
         ws.on('error', (error) => logger.error(scope, 'WebSocket error: %s', error.message));
-        ws.on('close', () => logger.info(scope, 'Client disconnected'));
+        ws.on('close', () => logger.debug(scope, 'Client disconnected'));
         ws.on('message', (message) => {
             const data = parseMessage(message, scope);
             if (data) {
@@ -39,7 +43,10 @@ function createGuiifmServer() {
     const server = new WebSocketServer({ port: PORTS.guiifm });
 
     server.on('connection', (ws) => {
-        logger.success('guiifm', 'Client connected');
+        logger.success('gui', 'connected');
+        if (runtime.emulatorControls) {
+            temperatureService.attach(ws);
+        }
         startup.sendCurrentTimeEpoch(ws);
 
         const clockSyncIntervalId =
@@ -55,7 +62,7 @@ function createGuiifmServer() {
             if (clockSyncIntervalId) {
                 clearInterval(clockSyncIntervalId);
             }
-            logger.info('guiifm', 'Client disconnected');
+            logger.info('gui', 'disconnected');
         });
         ws.on('message', (message) => {
             const data = parseMessage(message, 'guiifm');
@@ -74,8 +81,12 @@ function createGuiifmServer() {
     return server;
 }
 
+// The GUI socket and the emulator controls matter to the user; the other two are never used.
+const QUIET_SCOPES = ['appsdk', 'dbapi'];
+
 function listen(server, scope, port) {
-    server.on('listening', () => logger.info(scope, 'Listening on ws://localhost:%d', port));
+    const log = QUIET_SCOPES.includes(scope) ? logger.debug : logger.info;
+    server.on('listening', () => log(scope, 'Listening on ws://localhost:%d', port));
     server.on('error', (error) => logger.error(scope, 'Server error: %s', error.message));
 }
 
@@ -84,6 +95,15 @@ const servers = [
     { scope: 'appsdk', server: new WebSocketServer({ port: PORTS.appsdk }), port: PORTS.appsdk },
     { scope: 'dbapi', server: new WebSocketServer({ port: PORTS.dbapi }), port: PORTS.dbapi }
 ];
+
+// The emulator's own controls (temperature slider) are off unless runtime.json asks for them.
+if (runtime.emulatorControls) {
+    servers.push({
+        scope: 'control',
+        server: createControlServer(PORTS.control),
+        port: PORTS.control
+    });
+}
 
 attachPassiveEndpoint(servers[1].server, 'appsdk');
 attachPassiveEndpoint(servers[2].server, 'dbapi');

@@ -2,7 +2,7 @@
     "name": "mzd-emu",
     "private": true,
     "scripts": {
-        "start": "node server/start-all.js",
+        "start": "node server/launcher/start-all.js",
         "mmui": "node server/mmui-server.js",
         "ui": "node server/ui-server.js",
         "format": "prettier --write .",

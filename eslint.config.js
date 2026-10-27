@@ -20,8 +20,8 @@ module.exports = [
         }
     },
     {
-        // Runs in the browser next to the firmware GUI (see ui-polyfills.html).
-        files: ['server/ui-wayland.js'],
+        // Runs in the browser next to the firmware GUI (see server/browser/ui-polyfills.html).
+        files: ['server/browser/*.js'],
         languageOptions: {
             sourceType: 'script',
             globals: {
