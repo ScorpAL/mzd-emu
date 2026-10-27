@@ -6,7 +6,7 @@ const splashVideo = require('./splashVideo');
 // connection because several browser tabs may be open at once.
 const config = {
     // Delay before answering the GUI's first request, standing in for the real unit's long
-    // boot while the logo loops (LoopLogo.ivf, 2250 ms per pass; see browser/ui-wayland.js).
+    // boot while the logo loops (LoopLogo.ivf, 2250 ms per pass; see client/ui-wayland.js).
     // Keep it under 20 s, when the GUI falls back to defaults. 0 disables it.
     bootDelayMs: 4250
 };
