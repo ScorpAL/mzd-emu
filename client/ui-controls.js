@@ -37,6 +37,8 @@
                 'font:14px/1.4 sans-serif;color:#222;background:#fff;' +
                 'border-left:1px solid #ccc;min-height:480px;z-index:3000;'
         );
+        // ui-polyfills.html keeps the normal arrow cursor on this id.
+        panel.id = 'emulator-controls';
         panel.appendChild(el('div', 'font-weight:bold;font-size:16px;', 'Emulator controls'));
         panel.appendChild(
             el('div', 'color:#777;font-size:12px;margin-bottom:14px;', 'Not part of the head unit')
