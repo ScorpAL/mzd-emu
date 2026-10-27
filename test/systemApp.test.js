@@ -12,16 +12,45 @@ test.afterEach(() => {
     dialogState.disclaimerActive = false;
 });
 
-test('handleInitGui clears navigation and opens the Disclaimer without touching the back stack', () => {
+test('handleInitGui clears navigation and sends no context of its own', () => {
     navigationState.goBackStack.push({ uiaId: 'system', ctxtId: 'Applications', contextSeq: 1 });
     const ws = createMockWs();
 
     systemApp.handleInitGui(ws);
 
+    assert.equal(navigationState.goBackStack.length, 0);
+    assert.equal(ws.messages.length, 0);
+});
+
+test('cold start plays IntroAnimation and shows the Disclaimer only when the boot video ends', (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const ws = createMockWs();
+
+    systemApp.handleGetStartupSettings(ws);
+
+    const contexts = () => ws.messages.filter((m) => m.msgType === 'ctxtChg');
+    assert.equal(contexts().pop().ctxtId, 'IntroAnimation');
+    assert.equal(dialogState.disclaimerActive, false);
+
+    t.mock.timers.tick(4999);
+    assert.equal(contexts().pop().ctxtId, 'IntroAnimation');
+
+    t.mock.timers.tick(1);
+    assert.equal(contexts().pop().ctxtId, 'Disclaimer');
     assert.equal(dialogState.disclaimerActive, true);
     assert.equal(navigationState.goBackStack.length, 0);
-    const ctxtChg = ws.messages.find((m) => m.msgType === 'ctxtChg');
-    assert.equal(ctxtChg.ctxtId, 'Disclaimer');
+});
+
+test('leaving for Home during the boot video cancels the pending Disclaimer', (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const ws = createMockWs();
+    systemApp.handleGetStartupSettings(ws);
+
+    systemApp.handleIntentHome(ws);
+    t.mock.timers.tick(10000);
+
+    const ids = ws.messages.filter((m) => m.msgType === 'ctxtChg').map((m) => m.ctxtId);
+    assert.deepEqual(ids, ['IntroAnimation', 'HomeScreen']);
 });
 
 test('handleIntentHome resets the back stack and dismisses the disclaimer', () => {
@@ -119,7 +148,7 @@ test('handleIntentSettingsTab routes the Devices tab through syssettings devices
     assert.equal(ctxtChg.ctxtId, 'DevicesTab');
 });
 
-test('handleGetStartupSettings sends startup state from every subsystem and lands on Applications', () => {
+test('handleGetStartupSettings sends startup state from every subsystem and lands on IntroAnimation', () => {
     const ws = createMockWs();
 
     systemApp.handleGetStartupSettings(ws);
@@ -129,7 +158,29 @@ test('handleGetStartupSettings sends startup state from every subsystem and land
     assert.ok(ws.messages.some((m) => m.msgId === 'BTStatusAndList'));
     const ctxtChg = ws.messages.filter((m) => m.msgType === 'ctxtChg').pop();
     assert.equal(ctxtChg.uiaId, 'system');
-    assert.equal(ctxtChg.ctxtId, 'Applications');
+    assert.equal(ctxtChg.ctxtId, 'IntroAnimation');
     // Startup context change must not itself become a back-stack entry.
     assert.equal(navigationState.goBackStack.length, 0);
+});
+
+test('scheduleStartupSettings holds the startup reply back for the simulated boot time', (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const saved = systemApp.coldStart.bootDelayMs;
+    systemApp.coldStart.bootDelayMs = 8000;
+    try {
+        const ws = createMockWs();
+
+        systemApp.scheduleStartupSettings(ws);
+        t.mock.timers.tick(7999);
+        assert.equal(ws.messages.length, 0);
+
+        t.mock.timers.tick(1);
+        assert.ok(ws.messages.some((m) => m.msgId === 'Region'));
+        assert.equal(
+            ws.messages.filter((m) => m.msgType === 'ctxtChg').pop().ctxtId,
+            'IntroAnimation'
+        );
+    } finally {
+        systemApp.coldStart.bootDelayMs = saved;
+    }
 });

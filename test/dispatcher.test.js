@@ -2,10 +2,14 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const dispatcher = require('../server/mmui/dispatcher');
+const systemApp = require('../server/mmui/systemApp');
 const navigationState = require('../server/mmui/navigationState');
 const dialogState = require('../server/mmui/dialogState');
 const settings = require('../server/mmui/settings');
 const { createMockWs } = require('./helpers/mockWs');
+
+// The simulated boot wait would defer every startup reply in these synchronous tests.
+systemApp.coldStart.bootDelayMs = 0;
 
 function withStubbedSave(fn) {
     const originalSave = settings.saveUserSettings;
@@ -39,7 +43,8 @@ test('Global.GetStartupSettings routes to the full startup sequence', () => {
 
     assert.ok(ws.messages.some((m) => m.msgId === 'Region'));
     const ctxtChg = ws.messages.filter((m) => m.msgType === 'ctxtChg').pop();
-    assert.equal(ctxtChg.ctxtId, 'Applications');
+    assert.equal(ctxtChg.ctxtId, 'IntroAnimation');
+    systemApp.cancelColdStart(ws);
 });
 
 test('the default case turns an unknown "SelectXyz" event into a plain context change', () => {
