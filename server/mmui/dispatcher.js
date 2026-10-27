@@ -15,7 +15,7 @@ const ecoenergyApp = require('./ecoenergyApp');
 const handleMmuiEvent = function (ws, uiaId, eventId, params) {
     switch (eventId) {
         case 'Global.GetStartupSettings':
-            systemApp.handleGetStartupSettings(ws);
+            systemApp.scheduleStartupSettings(ws);
             break;
         case 'SelectDriveRecord':
             sendContextChange(ws, 'vdt', 'DriveChartDetails');

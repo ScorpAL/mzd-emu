@@ -12,6 +12,18 @@ const vehicleEquipment = require('./vehicleEquipment');
 const schedmaintApp = require('./schedmaintApp');
 const ecoenergyApp = require('./ecoenergyApp');
 const logger = require('../logger');
+const splashVideo = require('./splashVideo');
+
+// Simulated cold start (an object so tests can override it).
+const coldStart = {
+    // Delay before answering the GUI's first request, standing in for the real unit's long
+    // boot while the logo loops (LoopLogo.ivf, 2250 ms per pass; see ui-wayland.js).
+    // Keep it under 20 s, when the GUI falls back to defaults. 0 disables it.
+    bootDelayMs: 4250
+};
+
+// Cold-start timers per GUI connection; several browser tabs may be connected at once.
+const coldStartTimers = new WeakMap();
 
 function handleGetStartupSettings(ws) {
     startup.sendStartupSettings(ws);
@@ -35,19 +47,69 @@ function handleGetStartupSettings(ws) {
 
     btpairingApp.sendPhoneConnectedStatus(ws);
 
-    sendContextChange(ws, 'system', 'Applications', undefined, undefined, true);
+    startIntroAnimation(ws);
 }
 
-// The firmware shows this warning at every power-on.
-function handleInitGui(ws) {
+function cancelColdStart(ws) {
+    const timers = coldStartTimers.get(ws);
+    if (timers) {
+        clearTimeout(timers.boot);
+        clearTimeout(timers.intro);
+        coldStartTimers.delete(ws);
+    }
+}
+
+function setColdStartTimer(ws, key, delayMs, callback) {
+    const timers = coldStartTimers.get(ws) || {};
+    clearTimeout(timers[key]);
+    // Never keep the process alive just for a simulated boot step.
+    timers[key] = setTimeout(callback, delayMs).unref();
+    coldStartTimers.set(ws, timers);
+    if (typeof ws.once === 'function' && !timers.closeHooked) {
+        timers.closeHooked = true;
+        ws.once('close', () => cancelColdStart(ws));
+    }
+}
+
+// The GUI's startup request arrives instantly here; delay the answer like a real boot.
+function scheduleStartupSettings(ws) {
+    cancelColdStart(ws);
+    const delayMs = coldStart.bootDelayMs || 0;
+    if (delayMs <= 0) {
+        handleGetStartupSettings(ws);
+        return;
+    }
+    setColdStartTimer(ws, 'boot', delayMs, () => handleGetStartupSettings(ws));
+}
+
+// Cold start: the firmware starts the tranlogo video and enters IntroAnimation. When the
+// video ends it reports FinishIntroAnimation, the system state becomes NORMAL and the
+// native side raises ShowDisclaimer, which lands in the Disclaimer context.
+function startIntroAnimation(ws) {
+    dialogState.disclaimerActive = false;
+    sendContextChange(ws, 'system', 'IntroAnimation', undefined, undefined, true);
+    // The firmware leaves IntroAnimation when the tranlogo service exits at the end of the
+    // video; without the video file there is nothing to wait for.
+    const durationMs = splashVideo.ivfDurationMs('TranLogo.ivf') || 0;
+    setColdStartTimer(ws, 'intro', durationMs, () => showDisclaimer(ws));
+}
+
+function showDisclaimer(ws) {
     navigationState.goBackStack = [];
     dialogState.disclaimerActive = true;
     // Disclaimer is transient and must not enter the back stack.
     sendContextChange(ws, 'system', 'Disclaimer', undefined, undefined, true);
 }
 
+// The GUI asks for the current context; the firmware answers with the one it already holds
+// (IntroAnimation on cold start), so nothing new is sent here.
+function handleInitGui() {
+    navigationState.goBackStack = [];
+}
+
 // Home is the navigation root; discard stale stack entries.
 function handleIntentHome(ws) {
+    cancelColdStart(ws);
     navigationState.goBackStack = [];
     dialogState.disclaimerActive = false;
     sendContextChange(ws, 'system', 'HomeScreen');
@@ -222,6 +284,10 @@ function handleIntentSettingsTab(ws, params) {
 module.exports = {
     handleGetStartupSettings: handleGetStartupSettings,
     handleInitGui: handleInitGui,
+    showDisclaimer: showDisclaimer,
+    coldStart: coldStart,
+    cancelColdStart: cancelColdStart,
+    scheduleStartupSettings: scheduleStartupSettings,
     handleIntentHome: handleIntentHome,
     dismissDisclaimer: dismissDisclaimer,
     sendApplicationsState: sendApplicationsState,
