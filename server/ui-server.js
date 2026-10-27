@@ -7,13 +7,21 @@ const { openBrowser } = require('./launcher/open-browser');
 
 const CONFIG = {
     port: runtime.uiPort,
-    docRoot: path.join(__dirname, '..'),
+    // Only these directories are served (a request outside them is a 404); the rest of the
+    // repository (server code, settings, .git, tests) is never reachable from the browser.
+    mounts: [
+        // The firmware dump. The GUI uses absolute /jci/... paths, so the prefix is fixed.
+        { prefix: '/jci/', dir: path.join(__dirname, '..', 'jci') },
+        // Emulator code that runs in the browser.
+        { prefix: '/emulator/', dir: path.join(__dirname, '..', 'client') }
+    ],
+    runtimePath: '/emulator/runtime.json',
     guiPath: '/jci/gui/index.html',
     injectIntoPaths: ['/jci/gui/index.html'],
-    polyfillsFile: path.join(__dirname, 'browser', 'ui-polyfills.html'),
+    polyfillsFile: path.join(__dirname, '..', 'client', 'ui-polyfills.html'),
     injectBeforeMarker: '</head>',
     // Added to the injected HTML only when runtime.json enables the emulator controls.
-    controlsScript: '<script src="/server/browser/ui-controls.js"></script>\n'
+    controlsScript: '<script src="/emulator/ui-controls.js"></script>\n'
 };
 
 const MIME_TYPES = {
@@ -58,22 +66,36 @@ function injectPolyfills(htmlText) {
     return htmlText.slice(0, markerIndex) + polyfillSnippet + '\n' + htmlText.slice(markerIndex);
 }
 
-function resolveSafePath(urlPath) {
+// Maps a URL path to a file inside one of the mounts, or null when no mount covers it.
+function resolveRequestPath(urlPath) {
     const decodedPath = decodeURIComponent(urlPath.split('?')[0]);
-    const normalized = path.normalize(decodedPath).replace(/^(\.\.[/\\])+/, '');
-    const resolved = path.join(CONFIG.docRoot, normalized);
-    if (resolved !== CONFIG.docRoot && resolved.indexOf(CONFIG.docRoot + path.sep) !== 0) {
-        return null;
+    for (const mount of CONFIG.mounts) {
+        if (!decodedPath.startsWith(mount.prefix)) continue;
+        const resolved = path.resolve(mount.dir, decodedPath.slice(mount.prefix.length));
+        if (resolved.startsWith(mount.dir + path.sep)) return resolved;
     }
-    return resolved;
+    return null;
+}
+
+// The browser needs only the control port from the runtime settings, not the whole file.
+function clientRuntime() {
+    return JSON.stringify({ controlPort: runtime.controlPort });
 }
 
 function createServer() {
     return http.createServer(function (req, res) {
-        const urlPath = req.url === '/' ? '/index.html' : req.url;
+        const urlPath = req.url;
+        if (urlPath.split('?')[0] === CONFIG.runtimePath) {
+            res.writeHead(200, {
+                'Content-Type': MIME_TYPES['.json'],
+                'Cache-Control': 'no-store'
+            });
+            res.end(clientRuntime());
+            return;
+        }
         let filePath;
         try {
-            filePath = resolveSafePath(urlPath);
+            filePath = resolveRequestPath(urlPath);
         } catch (error) {
             logger.warn('ui-server', 'Invalid request path: %s', error.message);
             res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
@@ -82,8 +104,8 @@ function createServer() {
         }
 
         if (!filePath) {
-            res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
-            res.end('403 Forbidden');
+            res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+            res.end('404 Not Found: ' + urlPath);
             return;
         }
 
@@ -143,8 +165,8 @@ function start() {
         logger.info('ui-server', 'Serving the GUI on http://localhost:%d/', CONFIG.port);
         logger.debug(
             'ui-server',
-            'Document root %s, injecting %s into %s',
-            CONFIG.docRoot,
+            'Serving %s, injecting %s into %s',
+            CONFIG.mounts.map((m) => m.prefix).join(' '),
             path.basename(CONFIG.polyfillsFile),
             CONFIG.injectIntoPaths.join(', ')
         );
@@ -163,7 +185,8 @@ module.exports = {
     CONFIG,
     getContentType,
     injectPolyfills,
-    resolveSafePath,
+    resolveRequestPath,
+    clientRuntime,
     createServer,
     start
 };

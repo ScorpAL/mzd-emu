@@ -152,7 +152,7 @@ on the screen, not every message on the wire:
 - `ui-server.js` serves the GUI and injects polyfills.
 - `launcher/` starts both servers and stops them together (`start-all.js`) and
   opens the browser (`open-browser.js`).
-- `browser/` holds the files that run in the browser, not on the server:
+- `client/` (next to `server/`) holds the files that run in the browser, not on the server:
   the compatibility shims (`ui-polyfills.html`) and the emulator-only scripts
   that play the boot videos (`ui-wayland.js`) and show the controls panel
   (`ui-controls.js`).
@@ -165,6 +165,8 @@ on the screen, not every message on the wire:
     - `services/` holds what the firmware does in separate services: settings,
       vehicle configuration, temperature, the cold-start clock.
     - `state/` keeps the navigation (go-back) stack.
+- Tests sit next to the code they test (`systemApp.test.js` beside `systemApp.js`);
+  shared test helpers are in `testing/`.
 - See [`docs/NATIVE_MAP.md`](docs/NATIVE_MAP.md) for which firmware component
   each file stands in for.
 - `config/` and `data/` hold the configuration described above.
@@ -173,11 +175,14 @@ on the screen, not every message on the wire:
 
 `jci/` is a read-only firmware dump and is never modified on disk. Instead,
 when `ui-server.js` serves `jci/gui/index.html`, it reads the file, inserts
-the contents of `browser/ui-polyfills.html` right before `</head>`, and serves that
+the contents of `client/ui-polyfills.html` right before `</head>`, and serves that
 combined HTML in the HTTP response — the original file on disk is untouched.
-`browser/ui-polyfills.html` does not change any GUI logic; it only adds polyfills
+`client/ui-polyfills.html` does not change any GUI logic; it only adds polyfills
 (shims) for old browser APIs the firmware's Presto-era JavaScript relies on,
 so that unmodified GUI code can run in a modern browser like Chrome.
+
+`ui-server.js` serves only `jci/` (at `/jci/`) and `client/` (at `/emulator/`); every
+other path, including the server code, settings and `.git`, answers 404.
 
 ## Checks and formatting
 

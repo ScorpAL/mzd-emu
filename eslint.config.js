@@ -20,8 +20,8 @@ module.exports = [
         }
     },
     {
-        // Runs in the browser next to the firmware GUI (see server/browser/ui-polyfills.html).
-        files: ['server/browser/*.js'],
+        // Runs in the browser next to the firmware GUI (see client/ui-polyfills.html).
+        files: ['client/*.js'],
         languageOptions: {
             sourceType: 'script',
             globals: {
