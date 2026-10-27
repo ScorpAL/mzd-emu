@@ -95,6 +95,9 @@ function close() {
             ({ server }) =>
                 new Promise((resolve) => {
                     server.close(() => resolve());
+                    // ws does not close connected clients itself; without this close() waits
+                    // for them forever and the process (and its clock sync timers) stays alive.
+                    server.clients.forEach((client) => client.terminate());
                 })
         )
     );
