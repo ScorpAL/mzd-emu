@@ -21,7 +21,20 @@ function write(level, scope, message, ...args) {
     console.log(`${prefix} ${message}`, ...args);
 }
 
+function banner(title, text) {
+    const width = Math.max(title.length, text.length) + 4;
+    const line = (content) => `║ ${content.padEnd(width - 4)} ║`;
+    const lines = [
+        `╔${'═'.repeat(width - 2)}╗`,
+        line(title),
+        line(text),
+        `╚${'═'.repeat(width - 2)}╝`
+    ];
+    console.log(`\n${lines.map((l) => styleText(['green', 'bold'], l)).join('\n')}\n`);
+}
+
 module.exports = {
+    banner,
     debug(scope, message, ...args) {
         write('debug', scope, message, ...args);
     },
