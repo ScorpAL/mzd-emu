@@ -2,5 +2,7 @@
     "uiPort": 8080,
     "guiifmPort": 2700,
     "appsdkPort": 2800,
-    "dbapiPort": 2766
+    "dbapiPort": 2766,
+    "controlPort": 2900,
+    "emulatorControls": false
 }

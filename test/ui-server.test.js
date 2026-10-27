@@ -14,3 +14,23 @@ test('resolveSafePath rejects malformed encoded paths', () => {
 test('getContentType returns a safe fallback for unknown extensions', () => {
     assert.equal(uiServer.getContentType('/file.bin'), 'application/octet-stream');
 });
+
+test('the emulator controls script is injected only when runtime.json enables it', () => {
+    const runtime = require('../server/config/runtime.json');
+    const saved = runtime.emulatorControls;
+    const html = '<html><head></head><body></body></html>';
+    try {
+        runtime.emulatorControls = false;
+        assert.ok(!uiServer.injectPolyfills(html).includes('ui-controls.js'));
+        assert.ok(uiServer.injectPolyfills(html).includes('ui-wayland.js'));
+
+        runtime.emulatorControls = true;
+        assert.ok(uiServer.injectPolyfills(html).includes('ui-controls.js'));
+    } finally {
+        runtime.emulatorControls = saved;
+    }
+});
+
+test('the emulator controls are off by default', () => {
+    assert.equal(require('../server/config/runtime.json').emulatorControls, false);
+});

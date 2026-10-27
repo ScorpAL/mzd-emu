@@ -54,7 +54,7 @@ Both servers must be running at the same time. From the project root:
 npm start
 ```
 
-This runs [`server/start-all.js`](server/start-all.js), which starts both
+This runs [`server/launcher/start-all.js`](server/launcher/start-all.js), which starts both
 servers together in one terminal and stops both together on Ctrl+C.
 
 After the servers start, the console prints the GUI address and your default
@@ -127,26 +127,55 @@ distances, audio levels, etc.) is user settings, not vehicle configuration.
 - Delete the file (or edit values in it directly) to reset settings back to
   the emulator's defaults; it will be recreated on the next change.
 
+## Reading the terminal log
+
+Each line is `time LEVEL scope message`. By default (`info`) you see what happens
+on the screen, not every message on the wire:
+
+```
+19:54:00 INFO  screen        system/Disclaimer
+19:54:08 INFO  setting       SetBrightness {"brightnessSetting":5}
+19:54:10 OK    settings      saved timeFormat="24h"
+19:54:15 INFO  temperature   Display too hot (92 C)
+```
+
+- `screen` is a screen change, `setting` a change made in the GUI, `settings`
+  the file being saved, `boot` the simulated start-up, `temperature` the
+  display temperature service.
+- `MZD_LOG_LEVEL=debug npm start` also shows every event received and message
+  sent (identical lines are collapsed into "repeated N more times").
+  `MZD_LOG_LEVEL=warn` shows only warnings and errors.
+
 ## `server/` structure
 
 - `mmui-server.js` is the native MMUI/UIA transport entry point.
 - `ui-server.js` serves the GUI and injects polyfills.
-- `start-all.js` starts both servers and stops them together.
-- `mmui/` contains handlers named after firmware `uiaId` values from
-  `jci/mmui/mmui_config.xml`, such as `system`, `syssettings`,
-  `vehsettings`, `audiosettings`, `btpairing`, `netmgmt`, `sysupdate`,
-  `schedmaint`, and `ecoenergy`.
+- `launcher/` starts both servers and stops them together (`start-all.js`) and
+  opens the browser (`open-browser.js`).
+- `browser/` holds the files that run in the browser, not on the server:
+  the compatibility shims (`ui-polyfills.html`) and the emulator-only scripts
+  that play the boot videos (`ui-wayland.js`) and show the controls panel
+  (`ui-controls.js`).
+- `mmui/` is the stand-in for the head unit's MMUI process:
+    - `uia/` has one handler per application, named after the firmware `uiaId`
+      values from `jci/mmui/mmui_config.xml` (`system`, `syssettings`,
+      `vehsettings`, `audiosettings`, `btpairing`, `netmgmt`, `sysupdate`,
+      `schedmaint`, `ecoenergy`), plus `commonApp.js` for the shared `Global.*`
+      events. Each exports an `events` table that `dispatcher.js` looks up.
+    - `services/` holds what the firmware does in separate services: settings,
+      vehicle configuration, temperature, the cold-start clock.
+    - `state/` keeps the navigation (go-back) stack.
+- See [`docs/NATIVE_MAP.md`](docs/NATIVE_MAP.md) for which firmware component
+  each file stands in for.
 - `config/` and `data/` hold the configuration described above.
-- `ui-polyfills.html` contains browser compatibility shims for the old
-  Presto-era GUI (see "How patching works" below).
 
 ### How patching works
 
 `jci/` is a read-only firmware dump and is never modified on disk. Instead,
 when `ui-server.js` serves `jci/gui/index.html`, it reads the file, inserts
-the contents of `ui-polyfills.html` right before `</head>`, and serves that
+the contents of `browser/ui-polyfills.html` right before `</head>`, and serves that
 combined HTML in the HTTP response — the original file on disk is untouched.
-`ui-polyfills.html` does not change any GUI logic; it only adds polyfills
+`browser/ui-polyfills.html` does not change any GUI logic; it only adds polyfills
 (shims) for old browser APIs the firmware's Presto-era JavaScript relies on,
 so that unmodified GUI code can run in a modern browser like Chrome.
 
