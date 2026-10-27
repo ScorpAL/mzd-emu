@@ -28,6 +28,33 @@
         return node;
     }
 
+    // Whether to show what lies outside the 800x480 screen (the head unit cuts it off).
+    var OUTSIDE_CLASS = 'emulator-show-outside';
+    var OUTSIDE_KEY = 'emulator.showOutside';
+
+    function buildOutsideSwitch() {
+        var row = el('label', 'display:block;margin-top:14px;font-size:13px;cursor:default;');
+        var box = el('input', 'margin:0 6px 0 0;vertical-align:middle;');
+        box.type = 'checkbox';
+        box.checked = localStorage.getItem(OUTSIDE_KEY) === '1';
+        function apply() {
+            document.documentElement.classList.toggle(OUTSIDE_CLASS, box.checked);
+            localStorage.setItem(OUTSIDE_KEY, box.checked ? '1' : '0');
+        }
+        box.addEventListener('change', apply);
+        apply();
+        row.appendChild(box);
+        row.appendChild(document.createTextNode('Show what lies outside the screen'));
+        row.appendChild(
+            el(
+                'div',
+                'color:#777;font-size:11px;margin:2px 0 0 20px;',
+                'Dimmed; the head unit cuts it off.'
+            )
+        );
+        return row;
+    }
+
     function buildPanel() {
         var panel = el(
             'div',
@@ -35,7 +62,7 @@
                 PANEL_LEFT +
                 'px;width:300px;padding:14px 16px;box-sizing:border-box;' +
                 'font:14px/1.4 sans-serif;color:#222;background:#fff;' +
-                'border-left:1px solid #ccc;min-height:480px;z-index:3000;'
+                'border-left:1px solid #ccc;min-height:480px;z-index:2147483647;'
         );
         // ui-polyfills.html keeps the normal arrow cursor on this id.
         panel.id = 'emulator-controls';
@@ -62,9 +89,11 @@
         panel.appendChild(ui.status);
         ui.note = el('div', 'margin-top:6px;color:#666;font-size:12px;', '');
         panel.appendChild(ui.note);
+        panel.appendChild(buildOutsideSwitch());
         ui.link = el('div', 'margin-top:14px;font-size:12px;color:#999;', 'Connecting…');
         panel.appendChild(ui.link);
-        document.body.appendChild(panel);
+        // Outside the body: the body clips everything to the 800x480 screen.
+        document.documentElement.appendChild(panel);
     }
 
     function addMark(percent, label, color) {

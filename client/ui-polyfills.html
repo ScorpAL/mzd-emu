@@ -94,6 +94,31 @@
             auto !important;
     }
 </style>
+<!-- The head unit shows the GUI in an 800x480 window; anything outside it is simply not visible. -->
+<!-- In a browser the viewport is bigger, so the body clips itself instead. "contain: paint" is used -->
+<!-- (not "overflow") because some controls are position:fixed or absolute and would escape an -->
+<!-- overflow clip. The body stays at 0,0: the GUI hit-tests clicks with pageX/pageY in screen pixels. -->
+<style>
+    body {
+        position: relative;
+        contain: paint;
+    }
+    /* Panel switch "Show what lies outside the screen": nothing is clipped, the outside is dimmed. */
+    html.emulator-show-outside body {
+        contain: none;
+    }
+    html.emulator-show-outside body::after {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 800px;
+        height: 480px;
+        box-shadow: 0 0 0 4000px rgba(255, 255, 255, 0.85);
+        pointer-events: none;
+        z-index: 2147483000;
+    }
+</style>
 <link rel="preload" href="../fonts/Tipperary.ttf" as="font" type="font/ttf" crossorigin />
 <link rel="preload" href="../fonts/TipperarySemibold.ttf" as="font" type="font/ttf" crossorigin />
 
