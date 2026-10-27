@@ -1,4 +1,5 @@
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const logger = require('../../logger');
 const VEHICLE_CONFIG_FILE = path.join(__dirname, '..', '..', 'config/vehicle.json');
@@ -83,7 +84,22 @@ requireAllowedValue('androidAutoAvailable', VEHICLE_CONFIG.androidAutoAvailable,
 requireAllowedValue('androidAutoConnection', VEHICLE_CONFIG.androidAutoConnection, ['On', 'Off']);
 requireAllowedValue('androidAutoSettings', VEHICLE_CONFIG.androidAutoSettings, ['On', 'Off']);
 
-const USER_SETTINGS_FILE = path.join(__dirname, '..', '..', 'data/user-settings.json');
+// Under `node --test` the test files run in parallel processes, and many of them save
+// settings. Each process therefore gets its own file in the temp directory, so the tests
+// never touch (or race on) the real data/user-settings.json.
+function userSettingsFile() {
+    if (process.env.MZD_USER_SETTINGS) {
+        return process.env.MZD_USER_SETTINGS;
+    }
+    if (process.env.NODE_TEST_CONTEXT) {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mzd-emu-test-'));
+        process.on('exit', () => fs.rmSync(dir, { recursive: true, force: true }));
+        return path.join(dir, 'user-settings.json');
+    }
+    return path.join(__dirname, '..', '..', 'data/user-settings.json');
+}
+
+const USER_SETTINGS_FILE = userSettingsFile();
 
 function loadUserSettings() {
     try {
@@ -198,7 +214,11 @@ function saveUserSettings() {
         const changedFields = Object.keys(toSave).filter(
             (fieldName) => previousSettings[fieldName] !== toSave[fieldName]
         );
-        fs.writeFileSync(USER_SETTINGS_FILE, JSON.stringify(toSave, null, 2));
+        // Write a temporary file and rename it, so a reader (or a crash) never sees a half-written
+        // file: rename replaces the old file in one step.
+        const tempFile = USER_SETTINGS_FILE + '.tmp';
+        fs.writeFileSync(tempFile, JSON.stringify(toSave, null, 2));
+        fs.renameSync(tempFile, USER_SETTINGS_FILE);
         if (changedFields.length > 0) {
             const changes = changedFields.map(
                 (fieldName) => `${fieldName}=${JSON.stringify(toSave[fieldName])}`
@@ -519,6 +539,7 @@ const settings = {
     DEFAULT_SETTINGS: DEFAULT_SETTINGS,
     HARDWARE_CONFIG: HARDWARE_CONFIG,
     VEHICLE_CONFIG_FILE: VEHICLE_CONFIG_FILE,
+    USER_SETTINGS_FILE: USER_SETTINGS_FILE,
     // currentSettings = DEFAULT_SETTINGS with any saved data/user-settings.json values on
     // top. (HARDWARE_CONFIG is intentionally not part of this merge - see comment above.)
     currentSettings: Object.assign({}, DEFAULT_SETTINGS, loadUserSettings()),
