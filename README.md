@@ -57,7 +57,8 @@ npm start
 This runs [`server/start-all.js`](server/start-all.js), which starts both
 servers together in one terminal and stops both together on Ctrl+C.
 
-Open <http://localhost:8080/jci/gui/index.html> after the servers start.
+After the servers start, the console prints the GUI address and your default
+browser opens <http://localhost:8080/jci/gui/index.html> automatically. If it doesn't open, use the printed address.
 
 You can also run them separately (e.g. in two terminals, to see each one's
 logs on its own):

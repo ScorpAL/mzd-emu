@@ -3,10 +3,12 @@ const fs = require('fs');
 const path = require('path');
 const logger = require('./logger');
 const runtime = require('./config/runtime.json');
+const { openBrowser } = require('./open-browser');
 
 const CONFIG = {
     port: runtime.uiPort,
     docRoot: path.join(__dirname, '..'),
+    guiPath: '/jci/gui/index.html',
     injectIntoPaths: ['/jci/gui/index.html'],
     polyfillsFile: path.join(__dirname, 'ui-polyfills.html'),
     injectBeforeMarker: '</head>'
@@ -142,6 +144,9 @@ function start() {
             path.basename(CONFIG.polyfillsFile),
             CONFIG.injectIntoPaths.join(', ')
         );
+        const guiUrl = `http://localhost:${CONFIG.port}${CONFIG.guiPath}`;
+        logger.banner('Open in your browser:', guiUrl);
+        openBrowser(guiUrl);
     });
     return server;
 }

@@ -9,7 +9,10 @@ const children = [
     { name: 'mmui', script: path.join(__dirname, 'mmui-server.js') },
     { name: 'ui', script: path.join(__dirname, 'ui-server.js') }
 ].map(function (entry) {
-    const child = spawn(process.execPath, [entry.script], { stdio: 'inherit' });
+    const child = spawn(process.execPath, [entry.script], {
+        stdio: 'inherit',
+        env: { ...process.env, MZD_OPEN_BROWSER: process.env.MZD_OPEN_BROWSER || '1' }
+    });
     child.on('error', function (error) {
         logger.error('launcher', '%s failed to start: %s', entry.name, error.message);
         process.exitCode = 1;
