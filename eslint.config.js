@@ -19,5 +19,17 @@ module.exports = [
             'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }]
         }
     },
+    {
+        // Runs in the browser next to the firmware GUI (see ui-polyfills.html).
+        files: ['server/ui-wayland.js'],
+        languageOptions: {
+            sourceType: 'script',
+            globals: {
+                ...globals.browser,
+                VideoDecoder: 'readonly',
+                EncodedVideoChunk: 'readonly'
+            }
+        }
+    },
     prettier
 ];
