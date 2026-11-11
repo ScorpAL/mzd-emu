@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -90,20 +91,34 @@ requireAllowedValue('androidAutoSettings', VEHICLE_CONFIG.androidAutoSettings, [
 
 // Under `node --test` the test files run in parallel processes, and many of them save
 // settings. Each process therefore gets its own file in the temp directory, so the tests
-// never touch (or race on) the real data/user-settings.json.
+// never touch (or race on) the real data/user-settings.json. The directory is made on the
+// first save only (most test processes never save), and removed when the process exits.
+const testSettingsDir = process.env.NODE_TEST_CONTEXT
+    ? path.join(os.tmpdir(), `mzd-emu-test-${process.pid}-${crypto.randomUUID()}`)
+    : null;
+
 function userSettingsFile() {
     if (process.env.MZD_USER_SETTINGS) {
         return process.env.MZD_USER_SETTINGS;
     }
-    if (process.env.NODE_TEST_CONTEXT) {
-        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mzd-emu-test-'));
-        process.on('exit', () => fs.rmSync(dir, { recursive: true, force: true }));
-        return path.join(dir, 'user-settings.json');
+    if (testSettingsDir) {
+        return path.join(testSettingsDir, 'user-settings.json');
     }
     return path.join(__dirname, '..', '..', 'data/user-settings.json');
 }
 
 const USER_SETTINGS_FILE = userSettingsFile();
+
+function ensureTestSettingsDir() {
+    if (!testSettingsDir || path.dirname(USER_SETTINGS_FILE) !== testSettingsDir) {
+        return;
+    }
+    if (!fs.existsSync(testSettingsDir)) {
+        // Not recursive: the name is new, so an existing directory means someone else made it.
+        fs.mkdirSync(testSettingsDir, { mode: 0o700 });
+        process.on('exit', () => fs.rmSync(testSettingsDir, { recursive: true, force: true }));
+    }
+}
 
 function loadUserSettings() {
     try {
@@ -220,6 +235,7 @@ function saveUserSettings() {
         );
         // Write a temporary file and rename it, so a reader (or a crash) never sees a half-written
         // file: rename replaces the old file in one step.
+        ensureTestSettingsDir();
         const tempFile = USER_SETTINGS_FILE + '.tmp';
         fs.writeFileSync(tempFile, JSON.stringify(toSave, null, 2));
         fs.renameSync(tempFile, USER_SETTINGS_FILE);

@@ -146,4 +146,5 @@ const events = {
     SelectDriveRecord: (ws) => sendContextChange(ws, 'vdt', 'DriveChartDetails')
 };
 
-module.exports = { events: events };
+// DIALOG_OWNERS is exported for the tests, which put every dialog flag back after each test.
+module.exports = { events: events, DIALOG_OWNERS: DIALOG_OWNERS };
