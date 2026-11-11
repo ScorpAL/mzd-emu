@@ -1,68 +1,50 @@
-const test = require('node:test');
+const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
 const netmgmtApp = require('./netmgmtApp');
 const settings = require('../services/settings');
-const { createMockWs } = require('../../testing/mockWs');
+const { createMockWs, contexts, msgIds, payloadOf } = require('../../testing/mockWs');
+const { useCleanState } = require('../../testing/state');
 
-function withStubbedSave(fn) {
-    const originalSave = settings.saveUserSettings;
-    settings.saveUserSettings = () => {};
-    try {
-        fn();
-    } finally {
-        settings.saveUserSettings = originalSave;
-    }
-}
+const current = settings.currentSettings;
 
-test.afterEach(() => {
-    settings.currentSettings.wifiMode = 1;
-});
+describe('netmgmtApp', () => {
+    const fixture = useCleanState();
 
-test('sendWifiState reports mode, status and empty network lists', () => {
-    const ws = createMockWs();
-    settings.currentSettings.wifiMode = 1;
+    it('the Wi-Fi state reports the mode, the status and empty network lists', () => {
+        current.wifiMode = 1;
+        const ws = createMockWs();
+        netmgmtApp.sendWifiState(ws);
+        assert.deepEqual(msgIds(ws), [
+            'WifiMode',
+            'WifiStatus',
+            'ScannedNetworksList',
+            'RememberedNetworksList'
+        ]);
+        assert.equal(payloadOf(ws, 'WifiStatus').onOffState, 1);
+    });
 
-    netmgmtApp.sendWifiState(ws);
-
-    const msgIds = ws.messages.map((m) => m.msgId);
-    assert.deepEqual(msgIds, [
-        'WifiMode',
-        'WifiStatus',
-        'ScannedNetworksList',
-        'RememberedNetworksList'
-    ]);
-    assert.equal(ws.messages[1].params.payload.onOffState, 1);
-});
-
-test('handleSetWifiConnection persists the requested on/off state', () => {
-    withStubbedSave(() => {
+    it('SetWifiConnection saves the requested on/off state', () => {
         const ws = createMockWs();
         netmgmtApp.handleSetWifiConnection(ws, { payload: { offOn: 0 } });
-        assert.equal(settings.currentSettings.wifiMode, 0);
-
+        assert.equal(current.wifiMode, 0);
         netmgmtApp.handleSetWifiConnection(ws, { payload: { offOn: 1 } });
-        assert.equal(settings.currentSettings.wifiMode, 1);
+        assert.equal(current.wifiMode, 1);
+        assert.equal(fixture.saves, 2);
     });
-});
 
-test('handleSelectWifiMode updates and re-sends state when a mode is provided', () => {
-    withStubbedSave(() => {
+    it('SelectWifiMode saves a given mode and sends the state again', () => {
+        current.wifiMode = 1;
         const ws = createMockWs();
         netmgmtApp.handleSelectWifiMode(ws, { payload: { wifiMode: 0 } });
-        assert.equal(settings.currentSettings.wifiMode, 0);
-        assert.ok(ws.messages.some((m) => m.msgId === 'WifiMode'));
+        assert.equal(current.wifiMode, 0);
+        assert.ok(msgIds(ws).includes('WifiMode'));
     });
-});
 
-test('handleSelectNetworkManagement picks the AP-off context when wireless CarPlay is unavailable', () => {
-    const ws = createMockWs();
-    const original = settings.HARDWARE_CONFIG.appleWirelessCarPlayAvailable;
-    settings.HARDWARE_CONFIG.appleWirelessCarPlayAvailable = 'Off';
-
-    netmgmtApp.handleSelectNetworkManagement(ws);
-
-    const ctxtChg = ws.messages.find((m) => m.msgType === 'ctxtChg');
-    assert.equal(ctxtChg.ctxtId, 'NetworkOptions');
-    settings.HARDWARE_CONFIG.appleWirelessCarPlayAvailable = original;
+    it('Network Management opens the access-point-off screen without wireless CarPlay', () => {
+        settings.HARDWARE_CONFIG.appleWirelessCarPlayAvailable = 'Off';
+        const ws = createMockWs();
+        netmgmtApp.handleSelectNetworkManagement(ws);
+        assert.deepEqual(contexts(ws), ['NetworkOptions']);
+    });
 });

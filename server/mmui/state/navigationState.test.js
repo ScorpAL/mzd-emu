@@ -1,17 +1,10 @@
-const test = require('node:test');
+const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
 const navigationState = require('./navigationState');
 
-test.afterEach(() => {
-    navigationState.goBackStack.length = 0;
-});
-
-test('goBackStack starts empty and accepts pushed context frames', () => {
-    assert.deepEqual(navigationState.goBackStack, []);
-
-    navigationState.goBackStack.push({ uiaId: 'system', ctxtId: 'Home', contextSeq: 1 });
-
-    assert.equal(navigationState.goBackStack.length, 1);
-    assert.equal(navigationState.goBackStack[0].uiaId, 'system');
+describe('navigationState', () => {
+    it('the back stack starts empty', () => {
+        assert.deepEqual(navigationState.goBackStack, []);
+    });
 });

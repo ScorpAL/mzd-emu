@@ -1,239 +1,365 @@
-const test = require('node:test');
+const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
 const systemApp = require('./systemApp');
 const coldStart = require('../services/coldStart');
 const settings = require('../services/settings');
-const navigationState = require('../state/navigationState');
 const vehicleEquipment = require('../services/vehicleEquipment');
-const { createMockWs } = require('../../testing/mockWs');
+const { createMockWs, contexts, contextPaths, msgIds } = require('../../testing/mockWs');
+const { useCleanState, setBackStack, backStack, backStackPaths } = require('../../testing/state');
+const { useMockTimers } = require('../../testing/timers');
 
-test.afterEach(() => {
-    navigationState.goBackStack.length = 0;
-    systemApp.dialogs.disclaimerActive = false;
-});
+const { events, dialogs } = systemApp;
+const hardware = settings.HARDWARE_CONFIG;
 
-test('handleInitGui clears navigation and sends no context of its own', () => {
-    navigationState.goBackStack.push({ uiaId: 'system', ctxtId: 'Applications', contextSeq: 1 });
-    const ws = createMockWs();
+describe('systemApp', () => {
+    useCleanState();
 
-    systemApp.handleInitGui(ws);
+    describe('cold start', () => {
+        it('Global.InitGui clears navigation and sends no context of its own', () => {
+            setBackStack(['system', 'Applications']);
+            const ws = createMockWs();
+            events['Global.InitGui'](ws);
+            assert.deepEqual(backStack(), []);
+            assert.deepEqual(ws.messages, []);
+        });
 
-    assert.equal(navigationState.goBackStack.length, 0);
-    assert.equal(ws.messages.length, 0);
-});
+        it('GetStartupSettings sends the state of every subsystem and lands on IntroAnimation', () => {
+            const ws = createMockWs();
+            systemApp.handleGetStartupSettings(ws);
+            systemApp.cancelColdStart(ws);
 
-test('cold start plays IntroAnimation and shows the Disclaimer only when the boot video ends', (t) => {
-    t.mock.timers.enable({ apis: ['setTimeout'] });
-    const ws = createMockWs();
+            for (const msgId of ['Region', 'BoseAvailable', 'BTStatusAndList']) {
+                assert.ok(
+                    ws.messages.some((m) => m.msgId === msgId),
+                    msgId
+                );
+            }
+            assert.deepEqual(contextPaths(ws), ['system/IntroAnimation']);
+            // The startup context change does not itself become a back-stack entry.
+            assert.deepEqual(backStack(), []);
+        });
 
-    systemApp.handleGetStartupSettings(ws);
+        it('the startup reply waits for the simulated boot time', (t) => {
+            const timers = useMockTimers(t);
+            coldStart.config.bootDelayMs = 8000;
+            const ws = createMockWs();
 
-    const contexts = () => ws.messages.filter((m) => m.msgType === 'ctxtChg');
-    assert.equal(contexts().pop().ctxtId, 'IntroAnimation');
-    assert.equal(systemApp.dialogs.disclaimerActive, false);
+            systemApp.scheduleStartupSettings(ws);
+            timers.tick(7999);
+            assert.deepEqual(ws.messages, []);
 
-    t.mock.timers.tick(4999);
-    assert.equal(contexts().pop().ctxtId, 'IntroAnimation');
+            timers.tick(1);
+            assert.ok(msgIds(ws).includes('Region'));
+            assert.deepEqual(contexts(ws), ['IntroAnimation']);
+            systemApp.cancelColdStart(ws);
+        });
 
-    t.mock.timers.tick(1);
-    assert.equal(contexts().pop().ctxtId, 'Disclaimer');
-    assert.equal(systemApp.dialogs.disclaimerActive, true);
-    assert.equal(navigationState.goBackStack.length, 0);
-});
+        it('IntroAnimation plays, and the Disclaimer opens only when the boot video ends', (t) => {
+            const timers = useMockTimers(t);
+            const ws = createMockWs();
+            systemApp.handleGetStartupSettings(ws);
+            assert.deepEqual(contexts(ws), ['IntroAnimation']);
+            assert.equal(dialogs.disclaimerActive, false);
 
-test('leaving for Home during the boot video cancels the pending Disclaimer', (t) => {
-    t.mock.timers.enable({ apis: ['setTimeout'] });
-    const ws = createMockWs();
-    systemApp.handleGetStartupSettings(ws);
+            timers.tick(4999);
+            assert.deepEqual(contexts(ws), ['IntroAnimation']);
 
-    systemApp.handleIntentHome(ws);
-    t.mock.timers.tick(10000);
+            timers.tick(1);
+            assert.deepEqual(contexts(ws), ['IntroAnimation', 'Disclaimer']);
+            assert.equal(dialogs.disclaimerActive, true);
+            assert.deepEqual(backStack(), []);
+        });
 
-    const ids = ws.messages.filter((m) => m.msgType === 'ctxtChg').map((m) => m.ctxtId);
-    assert.deepEqual(ids, ['IntroAnimation', 'HomeScreen']);
-});
+        it('leaving for Home during the boot video cancels the pending Disclaimer', (t) => {
+            const timers = useMockTimers(t);
+            const ws = createMockWs();
+            systemApp.handleGetStartupSettings(ws);
 
-test('handleIntentHome resets the back stack and dismisses the disclaimer', () => {
-    systemApp.dialogs.disclaimerActive = true;
-    navigationState.goBackStack.push({ uiaId: 'system', ctxtId: 'Applications', contextSeq: 1 });
-    const ws = createMockWs();
+            systemApp.handleIntentHome(ws);
+            timers.tick(10000);
+            assert.deepEqual(contexts(ws), ['IntroAnimation', 'HomeScreen']);
+        });
+    });
 
-    systemApp.handleIntentHome(ws);
+    describe('Home and the Disclaimer', () => {
+        it('Global.IntentHome resets the back stack and dismisses the Disclaimer', () => {
+            dialogs.disclaimerActive = true;
+            setBackStack(['system', 'Applications']);
+            const ws = createMockWs();
 
-    assert.equal(systemApp.dialogs.disclaimerActive, false);
-    const ctxtChg = ws.messages.find((m) => m.msgType === 'ctxtChg');
-    assert.equal(ctxtChg.ctxtId, 'HomeScreen');
-});
+            events['Global.IntentHome'](ws);
 
-test('dismissDisclaimer behaves like handleIntentHome', () => {
-    systemApp.dialogs.disclaimerActive = true;
-    const ws = createMockWs();
+            assert.equal(dialogs.disclaimerActive, false);
+            assert.deepEqual(contextPaths(ws), ['system/HomeScreen']);
+            assert.deepEqual(backStack(), ['HomeScreen']);
+        });
 
-    systemApp.dismissDisclaimer(ws);
+        it('agreeing to the Disclaimer without a pending warning just goes Home', () => {
+            dialogs.disclaimerActive = true;
+            const ws = createMockWs();
+            systemApp.dismissDisclaimer(ws);
+            assert.deepEqual(contextPaths(ws), ['system/HomeScreen']);
+            assert.equal(dialogs.disclaimerActive, false);
+            assert.deepEqual(backStack(), ['HomeScreen']);
+        });
 
-    assert.equal(systemApp.dialogs.disclaimerActive, false);
-    assert.equal(navigationState.goBackStack.length, 1);
-    const ctxtChg = ws.messages.find((m) => m.msgType === 'ctxtChg');
-    assert.equal(ctxtChg.ctxtId, 'HomeScreen');
-});
+        it('the shared Yes answers the Disclaimer, and No answers nothing here', () => {
+            assert.deepEqual(systemApp.dialogAnswers.yes, [
+                ['disclaimerActive', systemApp.dismissDisclaimer]
+            ]);
+            assert.deepEqual(systemApp.dialogAnswers.no, []);
+        });
+    });
 
-test('sendApplicationsState reports every application tile status', () => {
-    const ws = createMockWs();
+    describe('the temperature warning', () => {
+        it('opens once, outside the back stack', () => {
+            const ws = createMockWs();
+            systemApp.requestSystemWarning(ws);
+            assert.deepEqual(contextPaths(ws), ['system/SystemWarning']);
+            assert.equal(systemApp.isSystemWarningOpen(ws), true);
+            assert.deepEqual(backStack(), [], 'a transient dialog');
 
-    systemApp.sendApplicationsState(ws);
+            systemApp.requestSystemWarning(ws);
+            assert.deepEqual(contexts(ws), ['SystemWarning'], 'a second request is ignored');
+        });
 
-    const appNames = ws.messages
-        .filter((m) => m.msgId === 'StatusMenu')
-        .map((m) => m.params.payload.statusMenu.appName);
-    assert.ok(appNames.includes('ecoenergy'));
-    assert.ok(appNames.includes('schedmaint'));
-    assert.ok(appNames.includes('carplay'));
-});
+        for (const flag of ['introAnimationActive', 'disclaimerActive']) {
+            it(`waits while ${flag}, and appears after Home once the Disclaimer is agreed to`, () => {
+                const ws = createMockWs();
+                dialogs[flag] = true;
+                systemApp.requestSystemWarning(ws);
+                assert.deepEqual(ws.messages, []);
+                assert.equal(systemApp.isSystemWarningOpen(ws), false);
 
-function stitcherMessages(ws) {
-    return ws.messages.filter(
-        (m) =>
-            (m.msgId === 'StatusMenu' && m.params.payload.statusMenu.appName === 'stitcher') ||
-            (m.msgId === 'StatusMenuVisible' && m.params.payload.appName === 'stitcher')
-    );
-}
+                dialogs.introAnimationActive = false;
+                dialogs.disclaimerActive = true;
+                systemApp.dismissDisclaimer(ws);
+                assert.deepEqual(contexts(ws), ['HomeScreen', 'SystemWarning']);
+                assert.equal(systemApp.isSystemWarningOpen(ws), true);
+            });
+        }
 
-test('Stitcher is available, and no visibility message is sent, for the configured vehicle', () => {
-    const ws = createMockWs();
+        it('OK goes Home, clears the back stack, and allows the next warning', () => {
+            const ws = createMockWs();
+            systemApp.requestSystemWarning(ws);
+            setBackStack(['system', 'Applications']);
+            systemApp.dismissSystemWarning(ws);
 
-    systemApp.sendApplicationsState(ws);
+            assert.equal(systemApp.isSystemWarningOpen(ws), false);
+            assert.equal(contexts(ws).at(-1), 'HomeScreen');
+            assert.deepEqual(backStack(), ['HomeScreen']);
 
-    const msgs = stitcherMessages(ws);
-    assert.equal(systemApp.isStitcherBlockedForThisVehicle(), false);
-    assert.equal(msgs.length, 1);
-    assert.equal(msgs[0].msgId, 'StatusMenu');
-    assert.equal(msgs[0].params.payload.statusMenu.appStatus, 'Available');
-});
+            systemApp.requestSystemWarning(ws);
+            assert.equal(systemApp.isSystemWarningOpen(ws), true);
+        });
 
-test('Stitcher is hidden and unavailable only for destination CA with vehicle model J03W', () => {
-    const config = settings.HARDWARE_CONFIG;
-    const original = { destinationCode: config.destinationCode, vehicleType: config.vehicleType };
-    try {
-        config.destinationCode = 'SETTINGS_Destination_CA';
-        config.vehicleType = 'SETTINGS_VehicleModelType_J03W';
-        const ws = createMockWs();
+        it('each GUI connection has its own warning', () => {
+            const first = createMockWs();
+            const second = createMockWs();
+            systemApp.requestSystemWarning(first);
+            assert.equal(systemApp.isSystemWarningOpen(second), false);
+            systemApp.requestSystemWarning(second);
+            assert.deepEqual(contexts(second), ['SystemWarning']);
+            systemApp.dismissSystemWarning(first);
+            assert.equal(systemApp.isSystemWarningOpen(second), true);
+        });
+    });
 
-        systemApp.sendApplicationsState(ws);
+    describe('Applications', () => {
+        // The Stitcher tile messages of sendApplicationsState.
+        function stitcherMessages(ws) {
+            return ws.messages.filter(
+                (m) =>
+                    (m.msgId === 'StatusMenu' &&
+                        m.params.payload.statusMenu.appName === 'stitcher') ||
+                    (m.msgId === 'StatusMenuVisible' && m.params.payload.appName === 'stitcher')
+            );
+        }
 
-        const msgs = stitcherMessages(ws);
-        assert.equal(systemApp.isStitcherBlockedForThisVehicle(), true);
-        assert.equal(
-            msgs.find((m) => m.msgId === 'StatusMenuVisible').params.payload.state,
-            'Invisible'
-        );
-        assert.equal(
-            msgs.find((m) => m.msgId === 'StatusMenu').params.payload.statusMenu.appStatus,
-            'Unavailable'
-        );
+        it('the state reports every application tile', () => {
+            const ws = createMockWs();
+            systemApp.sendApplicationsState(ws);
+            const appNames = ws.messages
+                .filter((m) => m.msgId === 'StatusMenu')
+                .map((m) => m.params.payload.statusMenu.appName);
+            for (const name of ['ecoenergy', 'schedmaint', 'carplay']) {
+                assert.ok(appNames.includes(name), name);
+            }
+        });
 
-        config.vehicleType = 'SETTINGS_VehicleModelType_J78A';
-        assert.equal(systemApp.isStitcherBlockedForThisVehicle(), false);
-        config.vehicleType = 'SETTINGS_VehicleModelType_J03W';
-        config.destinationCode = 'SETTINGS_Destination_EU';
-        assert.equal(systemApp.isStitcherBlockedForThisVehicle(), false);
-    } finally {
-        config.destinationCode = original.destinationCode;
-        config.vehicleType = original.vehicleType;
-    }
-});
+        it('SelectApplications refreshes the state and opens Applications', () => {
+            const ws = createMockWs();
+            events.SelectApplications(ws);
+            assert.ok(msgIds(ws).includes('StatusMenu'));
+            assert.deepEqual(contextPaths(ws), ['system/Applications']);
+        });
 
-test('handleSelectApplications refreshes state and opens Applications', () => {
-    const ws = createMockWs();
-    systemApp.handleSelectApplications(ws);
+        it('Stitcher is available, with no visibility message, for the configured vehicle', () => {
+            const ws = createMockWs();
+            systemApp.sendApplicationsState(ws);
+            const msgs = stitcherMessages(ws);
+            assert.equal(systemApp.isStitcherBlockedForThisVehicle(), false);
+            assert.deepEqual(
+                msgs.map((m) => m.msgId),
+                ['StatusMenu']
+            );
+            assert.equal(msgs[0].params.payload.statusMenu.appStatus, 'Available');
+        });
 
-    const ctxtChg = ws.messages.find((m) => m.msgType === 'ctxtChg');
-    assert.equal(ctxtChg.ctxtId, 'Applications');
-});
+        it('Stitcher is hidden and unavailable only for destination CA with model J03W', () => {
+            hardware.destinationCode = 'SETTINGS_Destination_CA';
+            hardware.vehicleType = 'SETTINGS_VehicleModelType_J03W';
+            const ws = createMockWs();
+            systemApp.sendApplicationsState(ws);
 
-test('handleSelectNavigation is a no-op (navigation is a separate, unemulated app)', () => {
-    assert.doesNotThrow(() => systemApp.handleSelectNavigation());
-});
+            const msgs = stitcherMessages(ws);
+            assert.equal(systemApp.isStitcherBlockedForThisVehicle(), true);
+            const visible = msgs.find((m) => m.msgId === 'StatusMenuVisible');
+            assert.equal(visible.params.payload.state, 'Invisible');
+            const status = msgs.find((m) => m.msgId === 'StatusMenu');
+            assert.equal(status.params.payload.statusMenu.appStatus, 'Unavailable');
 
-test('handleSelectSettings opens the HUD tab when HUD is installed', () => {
-    const original = vehicleEquipment.VEHICLE_EQUIPMENT.Hud_Installed;
-    vehicleEquipment.VEHICLE_EQUIPMENT.Hud_Installed = 1;
-    const ws = createMockWs();
+            hardware.vehicleType = 'SETTINGS_VehicleModelType_J78A';
+            assert.equal(systemApp.isStitcherBlockedForThisVehicle(), false, 'another model');
+            hardware.vehicleType = 'SETTINGS_VehicleModelType_J03W';
+            hardware.destinationCode = 'SETTINGS_Destination_EU';
+            assert.equal(systemApp.isStitcherBlockedForThisVehicle(), false, 'another market');
+        });
 
-    systemApp.handleSelectSettings(ws);
+        it('the Applications screen events open their application', () => {
+            for (const [eventId, expected] of [
+                ['SelectEntertainment', 'system/Entertainment'],
+                ['SelectCommunication', 'system/Communication'],
+                ['SelectWarnGuide', 'warnguide/WarningList'],
+                ['SelectSchedMaint', 'schedmaint/MaintenanceList'],
+                ['SelectEcoEnergy', 'ecoenergy/ControlStatus']
+            ]) {
+                const ws = createMockWs();
+                events[eventId](ws);
+                assert.deepEqual(contextPaths(ws), [expected], eventId);
+            }
+        });
 
-    const ctxtChg = ws.messages.find((m) => m.msgType === 'ctxtChg');
-    assert.equal(ctxtChg.uiaId, 'vehsettings');
-    assert.ok(ctxtChg.ctxtId === 'HUDTab' || ctxtChg.ctxtId === 'HUDTabJ78');
-    vehicleEquipment.VEHICLE_EQUIPMENT.Hud_Installed = original;
-});
+        it('SelectVehicleStatusMonitor refreshes the tile state first, then opens the monitor', () => {
+            const ws = createMockWs();
+            events.SelectVehicleStatusMonitor(ws);
 
-test('handleSelectSettings opens the Display tab when HUD is not installed', () => {
-    const original = vehicleEquipment.VEHICLE_EQUIPMENT.Hud_Installed;
-    vehicleEquipment.VEHICLE_EQUIPMENT.Hud_Installed = 0;
-    const ws = createMockWs();
+            assert.deepEqual(contextPaths(ws), ['system/VehicleStatusMonitor']);
+            const firstContext = ws.messages.findIndex((m) => m.msgType === 'ctxtChg');
+            const lastStatus = ws.messages.map((m) => m.msgId).lastIndexOf('StatusMenu');
+            assert.ok(lastStatus >= 0 && lastStatus < firstContext, 'the state comes first');
+        });
 
-    systemApp.handleSelectSettings(ws);
+        it('SelectNavigation sends nothing (navigation is a separate, unemulated app)', () => {
+            const ws = createMockWs();
+            events.SelectNavigation(ws);
+            assert.deepEqual(ws.messages, []);
+        });
+    });
 
-    const ctxtChg = ws.messages.find((m) => m.msgType === 'ctxtChg');
-    assert.equal(ctxtChg.uiaId, 'syssettings');
-    assert.equal(ctxtChg.ctxtId, 'DisplayTab');
-    vehicleEquipment.VEHICLE_EQUIPMENT.Hud_Installed = original;
-});
+    describe('Connect in the No Device window', () => {
+        it('closes the window and opens the Bluetooth list in its place', () => {
+            setBackStack(['system', 'Entertainment'], ['system', 'NoDevice']);
+            const ws = createMockWs();
+            events.SelectConnect(ws);
 
-test('handleIntentSettingsTab replaces the current stack entry with the requested tab', () => {
-    navigationState.goBackStack.push({ uiaId: 'syssettings', ctxtId: 'DisplayTab', contextSeq: 1 });
-    const ws = createMockWs();
+            assert.deepEqual(contextPaths(ws), ['btpairing/BTConnectionManager']);
+            // Back from Bluetooth returns to the Entertainment list, not to the closed window.
+            assert.deepEqual(backStack(), ['Entertainment', 'BTConnectionManager']);
+        });
 
-    systemApp.handleIntentSettingsTab(ws, { payload: { settingsTab: 'Sound' } });
+        it('leaves the stack alone when No Device is not on top', () => {
+            setBackStack(['system', 'Entertainment']);
+            events.SelectConnect(createMockWs());
+            assert.deepEqual(backStack(), ['Entertainment', 'BTConnectionManager']);
+        });
 
-    assert.equal(navigationState.goBackStack.length, 1);
-    assert.equal(navigationState.goBackStack[0].uiaId, 'audiosettings');
-    assert.equal(navigationState.goBackStack[0].ctxtId, 'SoundTab');
-});
+        it('does not pop a NoDevice context of another application', () => {
+            setBackStack(['stitcher', 'NoDevice']);
+            events.SelectConnect(createMockWs());
+            assert.deepEqual(backStack(), ['NoDevice', 'BTConnectionManager']);
+        });
 
-test('handleIntentSettingsTab routes the Devices tab through syssettings devices state', () => {
-    const ws = createMockWs();
-    systemApp.handleIntentSettingsTab(ws, { payload: { settingsTab: 'Devices' } });
+        it('works with an empty stack', () => {
+            const ws = createMockWs();
+            events.SelectConnect(ws);
+            assert.deepEqual(contextPaths(ws), ['btpairing/BTConnectionManager']);
+            assert.deepEqual(backStack(), ['BTConnectionManager']);
+        });
+    });
 
-    const ctxtChg = ws.messages.find((m) => m.msgType === 'ctxtChg');
-    assert.equal(ctxtChg.uiaId, 'syssettings');
-    assert.equal(ctxtChg.ctxtId, 'DevicesTab');
-});
+    describe('Settings', () => {
+        it('SelectSettings opens the HUD tab when a HUD is installed', () => {
+            vehicleEquipment.VEHICLE_EQUIPMENT.Hud_Installed = 1;
+            hardware.vehicleType = 'SETTINGS_VehicleModelType_J03W';
+            const ws = createMockWs();
+            systemApp.handleSelectSettings(ws);
+            assert.deepEqual(contextPaths(ws), ['vehsettings/HUDTab']);
+        });
 
-test('handleGetStartupSettings sends startup state from every subsystem and lands on IntroAnimation', () => {
-    const ws = createMockWs();
+        it('SelectSettings opens the J78 HUD tab on that model', () => {
+            vehicleEquipment.VEHICLE_EQUIPMENT.Hud_Installed = 1;
+            hardware.vehicleType = 'SETTINGS_VehicleModelType_J78A';
+            const ws = createMockWs();
+            systemApp.handleSelectSettings(ws);
+            assert.deepEqual(contextPaths(ws), ['vehsettings/HUDTabJ78']);
+        });
 
-    systemApp.handleGetStartupSettings(ws);
+        it('SelectSettings opens the Display tab when no HUD is installed', () => {
+            vehicleEquipment.VEHICLE_EQUIPMENT.Hud_Installed = 0;
+            const ws = createMockWs();
+            systemApp.handleSelectSettings(ws);
+            assert.deepEqual(contextPaths(ws), ['syssettings/DisplayTab']);
+        });
 
-    assert.ok(ws.messages.some((m) => m.msgId === 'Region'));
-    assert.ok(ws.messages.some((m) => m.msgId === 'BoseAvailable'));
-    assert.ok(ws.messages.some((m) => m.msgId === 'BTStatusAndList'));
-    const ctxtChg = ws.messages.filter((m) => m.msgType === 'ctxtChg').pop();
-    assert.equal(ctxtChg.uiaId, 'system');
-    assert.equal(ctxtChg.ctxtId, 'IntroAnimation');
-    // Startup context change must not itself become a back-stack entry.
-    assert.equal(navigationState.goBackStack.length, 0);
-});
+        it('each Settings tab event opens its tab', () => {
+            for (const [tab, expected] of [
+                ['Display', 'syssettings/DisplayTab'],
+                ['Safety', 'vehsettings/SafetyTab'],
+                ['Sound', 'audiosettings/SoundTab'],
+                ['Clock', 'syssettings/ClockTab'],
+                ['Vehicle', 'vehsettings/VehicleSettingsTab'],
+                ['Devices', 'syssettings/DevicesTab'],
+                ['System', 'syssettings/SystemTab']
+            ]) {
+                const ws = createMockWs();
+                events['Global.IntentSettingsTab'](ws, { payload: { settingsTab: tab } });
+                assert.deepEqual(contextPaths(ws), [expected], tab);
+            }
+        });
 
-test('scheduleStartupSettings holds the startup reply back for the simulated boot time', (t) => {
-    t.mock.timers.enable({ apis: ['setTimeout'] });
-    const saved = coldStart.config.bootDelayMs;
-    coldStart.config.bootDelayMs = 8000;
-    try {
-        const ws = createMockWs();
+        it('the HUD tab depends on the vehicle model', () => {
+            for (const [vehicleType, expected] of [
+                ['SETTINGS_VehicleModelType_J78A', 'vehsettings/HUDTabJ78'],
+                ['SETTINGS_VehicleModelType_J03W', 'vehsettings/HUDTab']
+            ]) {
+                hardware.vehicleType = vehicleType;
+                const ws = createMockWs();
+                systemApp.handleIntentSettingsTab(ws, { payload: { settingsTab: 'HUD' } });
+                assert.deepEqual(contextPaths(ws), [expected], vehicleType);
+            }
+        });
 
-        systemApp.scheduleStartupSettings(ws);
-        t.mock.timers.tick(7999);
-        assert.equal(ws.messages.length, 0);
+        it('a tab replaces the current entry of the back stack', () => {
+            setBackStack(['syssettings', 'DisplayTab']);
+            systemApp.handleIntentSettingsTab(createMockWs(), {
+                payload: { settingsTab: 'Sound' }
+            });
+            assert.deepEqual(backStackPaths(), ['audiosettings/SoundTab']);
+        });
 
-        t.mock.timers.tick(1);
-        assert.ok(ws.messages.some((m) => m.msgId === 'Region'));
-        assert.equal(
-            ws.messages.filter((m) => m.msgType === 'ctxtChg').pop().ctxtId,
-            'IntroAnimation'
-        );
-    } finally {
-        coldStart.config.bootDelayMs = saved;
-    }
+        it('an unknown tab only drops the current entry, and an empty stack is fine', () => {
+            setBackStack(['syssettings', 'DisplayTab']);
+            let ws = createMockWs();
+            systemApp.handleIntentSettingsTab(ws, { payload: { settingsTab: 'Nope' } });
+            assert.deepEqual(ws.messages, []);
+            assert.deepEqual(backStack(), []);
+
+            ws = createMockWs();
+            systemApp.handleIntentSettingsTab(ws, { payload: { settingsTab: 'Clock' } });
+            assert.deepEqual(contextPaths(ws), ['syssettings/ClockTab']);
+            assert.deepEqual(backStack(), ['ClockTab']);
+        });
+    });
 });

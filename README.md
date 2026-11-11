@@ -166,7 +166,11 @@ on the screen, not every message on the wire:
       vehicle configuration, temperature, the cold-start clock.
     - `state/` keeps the navigation (go-back) stack.
 - Tests sit next to the code they test (`systemApp.test.js` beside `systemApp.js`);
-  shared test helpers are in `testing/`.
+  shared test helpers are in `testing/`: `state.js` (`useCleanState()` puts the
+  MMUI state back after every test), `mockWs.js` (a fake GUI socket and queries on
+  what it received), `wsClient.js` (a real client for the servers), `logs.js`
+  (log lines as data) and `timers.js` (mock timers). The servers are tested in
+  process on port 0, so `npm test` runs next to `npm start` and in parallel.
 - See [`docs/NATIVE_MAP.md`](docs/NATIVE_MAP.md) for which firmware component
   each file stands in for.
 - `config/` and `data/` hold the configuration described above.

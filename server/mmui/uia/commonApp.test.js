@@ -1,87 +1,87 @@
-const test = require('node:test');
+const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
 const commonApp = require('./commonApp');
-const navigationState = require('../state/navigationState');
 const syssettingsApp = require('./syssettingsApp');
 const systemApp = require('./systemApp');
-const { createMockWs } = require('../../testing/mockWs');
-const { resetDialogs } = require('../../testing/dialogs');
+const vehicleEquipment = require('../services/vehicleEquipment');
+const { createMockWs, contexts, contextPaths } = require('../../testing/mockWs');
+const { useCleanState, setBackStack, backStack } = require('../../testing/state');
 
-const events = commonApp.events;
+const { events } = commonApp;
 
-test.afterEach(() => {
-    resetDialogs();
-    navigationState.goBackStack.length = 0;
-});
+describe('commonApp', () => {
+    useCleanState();
 
-test('Global.Yes and Global.No only act for the common sender', () => {
-    systemApp.dialogs.disclaimerActive = true;
-    const ws = createMockWs();
+    describe('Global.Yes', () => {
+        it('acts only for the common sender, whatever its case', () => {
+            systemApp.dialogs.disclaimerActive = true;
+            const ws = createMockWs();
 
-    events['Global.Yes'](ws, {}, 'ecoenergy-unknown');
-    assert.equal(systemApp.dialogs.disclaimerActive, true);
+            events['Global.Yes'](ws, {}, 'ecoenergy-unknown');
+            assert.equal(systemApp.dialogs.disclaimerActive, true);
 
-    events['Global.Yes'](ws, {}, 'Common');
-    assert.equal(systemApp.dialogs.disclaimerActive, false);
-});
+            events['Global.Yes'](ws, {}, 'Common');
+            assert.equal(systemApp.dialogs.disclaimerActive, false);
+        });
 
-test('Global.Yes answers the dialog that is open, in a fixed order', () => {
-    systemApp.dialogs.disclaimerActive = true;
-    syssettingsApp.dialogs.factoryResetConfirmActive = true;
-    const ws = createMockWs();
+        it('answers the dialog that is open, in a fixed order', () => {
+            systemApp.dialogs.disclaimerActive = true;
+            syssettingsApp.dialogs.factoryResetConfirmActive = true;
 
-    events['Global.Yes'](ws, {}, 'common');
+            events['Global.Yes'](createMockWs(), {}, 'common');
 
-    // The Disclaimer comes first; the factory reset dialog is left alone.
-    assert.equal(systemApp.dialogs.disclaimerActive, false);
-    assert.equal(syssettingsApp.dialogs.factoryResetConfirmActive, true);
-});
+            // The Disclaimer comes first; the factory reset dialog is left alone.
+            assert.equal(systemApp.dialogs.disclaimerActive, false);
+            assert.equal(syssettingsApp.dialogs.factoryResetConfirmActive, true);
+        });
+    });
 
-test('Timeout closes only the Disclaimer', () => {
-    const ws = createMockWs();
-    events.Timeout(ws, {}, 'system');
-    assert.equal(ws.messages.length, 0);
+    describe('Timeout', () => {
+        it('closes only the Disclaimer', () => {
+            const ws = createMockWs();
+            events.Timeout(ws, {}, 'system');
+            assert.deepEqual(ws.messages, []);
 
-    systemApp.dialogs.disclaimerActive = true;
-    events.Timeout(ws, {}, 'system');
-    assert.equal(systemApp.dialogs.disclaimerActive, false);
-    assert.equal(ws.messages.find((m) => m.msgType === 'ctxtChg').ctxtId, 'HomeScreen');
-});
+            systemApp.dialogs.disclaimerActive = true;
+            events.Timeout(ws, {}, 'system');
+            assert.equal(systemApp.dialogs.disclaimerActive, false);
+            assert.deepEqual(contexts(ws), ['HomeScreen']);
+        });
+    });
 
-test('Global.GoBack clears the flag of the dialog it closes and shows the screen below', () => {
-    navigationState.goBackStack.push(
-        { uiaId: 'system', ctxtId: 'HomeScreen', contextSeq: 1 },
-        { uiaId: 'syssettings', ctxtId: 'FactoryResetConfirm', contextSeq: 2 }
-    );
-    syssettingsApp.dialogs.factoryResetConfirmActive = true;
-    const ws = createMockWs();
+    describe('Global.GoBack', () => {
+        it('clears the flag of the dialog it closes and shows the screen below', () => {
+            setBackStack(['system', 'HomeScreen'], ['syssettings', 'FactoryResetConfirm']);
+            syssettingsApp.dialogs.factoryResetConfirmActive = true;
+            const ws = createMockWs();
 
-    events['Global.GoBack'](ws, {}, 'common-not-matching');
+            events['Global.GoBack'](ws, {}, 'common-not-matching');
 
-    assert.equal(syssettingsApp.dialogs.factoryResetConfirmActive, false);
-    assert.equal(navigationState.goBackStack.length, 1);
-    assert.equal(ws.messages.find((m) => m.msgType === 'ctxtChg').ctxtId, 'HomeScreen');
-});
+            assert.equal(syssettingsApp.dialogs.factoryResetConfirmActive, false);
+            assert.deepEqual(backStack(), ['HomeScreen']);
+            assert.deepEqual(contexts(ws), ['HomeScreen']);
+        });
 
-test('Global.GoBack never empties the stack', () => {
-    navigationState.goBackStack.push({ uiaId: 'system', ctxtId: 'HomeScreen', contextSeq: 1 });
-    const ws = createMockWs();
+        it('never empties the stack', () => {
+            setBackStack(['system', 'HomeScreen']);
+            const ws = createMockWs();
+            events['Global.GoBack'](ws, {}, 'common');
+            assert.deepEqual(backStack(), ['HomeScreen']);
+            assert.deepEqual(ws.messages, []);
+        });
+    });
 
-    events['Global.GoBack'](ws, {}, 'common');
+    describe('SelectSettings', () => {
+        it('opens the settings of the sender: ecoenergy has its own', () => {
+            vehicleEquipment.VEHICLE_EQUIPMENT.Hud_Installed = 1;
+            const fromSystem = createMockWs();
+            events.SelectSettings(fromSystem, {}, 'system');
+            assert.match(contextPaths(fromSystem)[0], /^vehsettings\/HUDTab/);
 
-    assert.equal(navigationState.goBackStack.length, 1);
-    assert.equal(ws.messages.length, 0);
-});
-
-test('SelectSettings opens the settings of the sender: ecoenergy has its own', () => {
-    const fromSystem = createMockWs();
-    events.SelectSettings(fromSystem, {}, 'system');
-    assert.equal(fromSystem.messages.find((m) => m.msgType === 'ctxtChg').uiaId, 'vehsettings');
-
-    const fromEco = createMockWs();
-    events.SelectSettings(fromEco, {}, 'ecoenergy');
-    const ctxtChg = fromEco.messages.find((m) => m.msgType === 'ctxtChg');
-    assert.equal(ctxtChg.uiaId, 'ecoenergy');
-    assert.equal(ctxtChg.ctxtId, 'Settings');
+            const fromEco = createMockWs();
+            events.SelectSettings(fromEco, {}, 'ecoenergy');
+            assert.deepEqual(contextPaths(fromEco), ['ecoenergy/Settings']);
+        });
+    });
 });

@@ -1,24 +1,26 @@
-const test = require('node:test');
+const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
 const vehicleEquipment = require('./vehicleEquipment');
 
-test('VEHICLE_EQUIPMENT flags are 0/1 (or SCBS_Installed submenu codes)', () => {
-    const equipment = vehicleEquipment.VEHICLE_EQUIPMENT;
-    Object.keys(equipment).forEach((flag) => {
-        assert.ok(
-            Number.isInteger(equipment[flag]),
-            `${flag} should be an integer flag, got ${equipment[flag]}`
-        );
+describe('vehicleEquipment', () => {
+    it('every VEHICLE_EQUIPMENT flag is an integer (0/1, or an SCBS_Installed submenu code)', () => {
+        for (const [flag, value] of Object.entries(vehicleEquipment.VEHICLE_EQUIPMENT)) {
+            assert.ok(Number.isInteger(value), `${flag} should be an integer flag, got ${value}`);
+        }
     });
-});
 
-test('getUiaIdForFlag routes syssettings-only flags correctly', () => {
-    assert.equal(vehicleEquipment.getUiaIdForFlag('TemperatureUnit_Installed'), 'syssettings');
-    assert.equal(vehicleEquipment.getUiaIdForFlag('DistanceUnit_Installed'), 'syssettings');
-});
+    describe('getUiaIdForFlag', () => {
+        it('routes the syssettings-only flags to syssettings', () => {
+            for (const flag of ['TemperatureUnit_Installed', 'DistanceUnit_Installed']) {
+                assert.equal(vehicleEquipment.getUiaIdForFlag(flag), 'syssettings', flag);
+            }
+        });
 
-test('getUiaIdForFlag defaults to vehsettings for everything else', () => {
-    assert.equal(vehicleEquipment.getUiaIdForFlag('BSM_Installed'), 'vehsettings');
-    assert.equal(vehicleEquipment.getUiaIdForFlag('UnknownFlag'), 'vehsettings');
+        it('routes everything else to vehsettings', () => {
+            for (const flag of ['BSM_Installed', 'UnknownFlag']) {
+                assert.equal(vehicleEquipment.getUiaIdForFlag(flag), 'vehsettings', flag);
+            }
+        });
+    });
 });

@@ -1,224 +1,176 @@
-const test = require('node:test');
+const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
 const syssettingsApp = require('./syssettingsApp');
 const settings = require('../services/settings');
-const navigationState = require('../state/navigationState');
-const { createMockWs } = require('../../testing/mockWs');
+const { createMockWs, contexts, msgIds, messageOf } = require('../../testing/mockWs');
+const { useCleanState, setBackStack, backStack } = require('../../testing/state');
+const { useMockTimers } = require('../../testing/timers');
 
-function withStubbedSave(fn) {
-    const originalSave = settings.saveUserSettings;
-    settings.saveUserSettings = () => {};
-    try {
-        fn();
-    } finally {
-        settings.saveUserSettings = originalSave;
-    }
+const app = syssettingsApp;
+const { dialogs } = app;
+const current = settings.currentSettings;
+
+// The msgIds a "send...State" function sends, in order.
+function sentBy(send) {
+    const ws = createMockWs();
+    send(ws);
+    return ws.messages.map((m) => m.msgId);
 }
 
-test.afterEach(() => {
-    navigationState.goBackStack.length = 0;
-    syssettingsApp.dialogs.languageConfActive = false;
-    syssettingsApp.dialogs.pendingLanguageId = null;
-    syssettingsApp.dialogs.displayResetConfirmActive = false;
-    syssettingsApp.dialogs.factoryResetConfirmActive = false;
-});
+describe('syssettingsApp', () => {
+    const fixture = useCleanState();
 
-test('handleSelectLanguageConf stages the pending language and opens the confirm dialog', () => {
-    const ws = createMockWs();
-    syssettingsApp.handleSelectLanguageConf(ws, { payload: { languageID: 'LANGS_FR_FRENCH' } });
-
-    assert.equal(syssettingsApp.dialogs.pendingLanguageId, 'LANGS_FR_FRENCH');
-    assert.equal(syssettingsApp.dialogs.languageConfActive, true);
-    const ctxtChg = ws.messages.find((m) => m.msgType === 'ctxtChg');
-    assert.equal(ctxtChg.ctxtId, 'LanguageConf');
-});
-
-test('handleSetLanguage applies the language after the progress delay and returns to the list', (t) => {
-    t.mock.timers.enable({ apis: ['setTimeout'] });
-    withStubbedSave(() => {
-        navigationState.goBackStack.push({
-            uiaId: 'syssettings',
-            ctxtId: 'ChangeLanguage',
-            contextSeq: 1
+    describe('language', () => {
+        it('Change Language opens the list and reports the active language', () => {
+            const ws = createMockWs();
+            app.handleSelectChangeLanguage(ws, 'syssettings');
+            assert.deepEqual(contexts(ws), ['ChangeLanguage']);
+            assert.ok(messageOf(ws, 'LanguageSupported'));
         });
-        navigationState.goBackStack.push({
-            uiaId: 'syssettings',
-            ctxtId: 'LanguageConf',
-            contextSeq: 2
+
+        it('choosing a language stages it and asks for confirmation', () => {
+            const ws = createMockWs();
+            app.handleSelectLanguageConf(ws, { payload: { languageID: 'LANGS_FR_FRENCH' } });
+            assert.equal(dialogs.pendingLanguageId, 'LANGS_FR_FRENCH');
+            assert.equal(dialogs.languageConfActive, true);
+            assert.deepEqual(contexts(ws), ['LanguageConf']);
         });
-        syssettingsApp.dialogs.pendingLanguageId = 'LANGS_DE_GERMAN';
-        const ws = createMockWs();
 
-        syssettingsApp.handleSetLanguage(ws, { payload: { languageID: 'LANGS_DE_GERMAN' } });
-        assert.ok(ws.messages.some((m) => m.ctxtId === 'LanguageChangeProgress'));
+        it('Yes applies the language after the progress delay and returns to the list', (t) => {
+            const timers = useMockTimers(t);
+            setBackStack(['syssettings', 'ChangeLanguage'], ['syssettings', 'LanguageConf']);
+            dialogs.pendingLanguageId = 'LANGS_DE_GERMAN';
+            const ws = createMockWs();
 
-        t.mock.timers.tick(900);
+            app.handleSetLanguage(ws, { payload: { languageID: 'LANGS_DE_GERMAN' } });
+            assert.ok(contexts(ws).includes('LanguageChangeProgress'));
 
-        assert.equal(settings.currentLanguageId, 'LANGS_DE_GERMAN');
-        assert.ok(ws.messages.some((m) => m.msgId === 'LanguageChanged'));
-        assert.equal(navigationState.goBackStack.length, 1);
-        assert.equal(navigationState.goBackStack[0].ctxtId, 'ChangeLanguage');
-        assert.equal(syssettingsApp.dialogs.pendingLanguageId, null);
-    });
-});
-
-test('handleLanguageConfNo dismisses without changing the language', () => {
-    navigationState.goBackStack.push({
-        uiaId: 'syssettings',
-        ctxtId: 'ChangeLanguage',
-        contextSeq: 1
-    });
-    navigationState.goBackStack.push({
-        uiaId: 'syssettings',
-        ctxtId: 'LanguageConf',
-        contextSeq: 2
-    });
-    syssettingsApp.dialogs.languageConfActive = true;
-
-    const ws = createMockWs();
-    syssettingsApp.handleLanguageConfNo(ws);
-
-    assert.equal(syssettingsApp.dialogs.languageConfActive, false);
-    assert.equal(navigationState.goBackStack.length, 1);
-});
-
-test('handleSetTimeFormat/handleSetUnitsTemperature/handleSetUnitsDistance persist their fields', () => {
-    withStubbedSave(() => {
-        syssettingsApp.handleSetTimeFormat({ payload: { formatTime: 'hrs24' } });
-        assert.equal(settings.currentSettings.timeFormat, 'hrs24');
-
-        syssettingsApp.handleSetUnitsTemperature({ payload: { unitsTemperature: 'Celsius' } });
-        assert.equal(settings.currentSettings.temperatureUnit, 'Celsius');
-
-        syssettingsApp.handleSetUnitsDistance({ payload: { unitsDistance: 'Kilometers' } });
-        assert.equal(settings.currentSettings.distanceUnit, 'Kilometers');
-    });
-});
-
-test('sendDisplayState reports the cached display fields', () => {
-    const ws = createMockWs();
-    syssettingsApp.sendDisplayState(ws);
-
-    const msgIds = ws.messages.map((m) => m.msgId);
-    assert.deepEqual(msgIds, ['DayNightMode', 'Brightness', 'Contrast', 'DisplayOverTemperature']);
-});
-
-test('display setting handlers persist brightness/contrast/day-night values', () => {
-    withStubbedSave(() => {
-        syssettingsApp.handleSetDisplayDayNight({ payload: { displayDayNightAuto: 'Night' } });
-        assert.equal(settings.currentSettings.displayDayNightMode, 'Night');
-
-        syssettingsApp.handleSetDisplayBrightness({ payload: { brightnessValue: 5 } });
-        assert.equal(settings.currentSettings.displayBrightness, 5);
-
-        syssettingsApp.handleSetDisplayContrast({ payload: { ContrastValue: -2 } });
-        assert.equal(settings.currentSettings.displayContrast, -2);
-    });
-});
-
-test('handleDisplayReset opens the confirm dialog and Yes resets to defaults', () => {
-    withStubbedSave(() => {
-        navigationState.goBackStack.push({
-            uiaId: 'syssettings',
-            ctxtId: 'DisplayTab',
-            contextSeq: 1
+            timers.tick(900);
+            assert.equal(settings.currentLanguageId, 'LANGS_DE_GERMAN');
+            assert.ok(msgIds(ws).includes('LanguageChanged'));
+            assert.deepEqual(backStack(), ['ChangeLanguage']);
+            assert.equal(dialogs.pendingLanguageId, null);
+            assert.equal(fixture.saves, 1);
         });
-        settings.currentSettings.displayBrightness = 9;
 
-        const ws = createMockWs();
-        syssettingsApp.handleDisplayReset(ws);
-        assert.equal(syssettingsApp.dialogs.displayResetConfirmActive, true);
-
-        syssettingsApp.handleDisplayResetYes(ws);
-        assert.equal(settings.currentSettings.displayBrightness, 0);
-        assert.equal(navigationState.goBackStack.length, 1);
-        assert.equal(navigationState.goBackStack[0].ctxtId, 'DisplayTab');
-
-        settings.currentSettings.displayBrightness = 0;
-    });
-});
-
-test('handleDisplayResetNo returns to the previous context without resetting values', () => {
-    navigationState.goBackStack.push({ uiaId: 'syssettings', ctxtId: 'DisplayTab', contextSeq: 1 });
-    navigationState.goBackStack.push({
-        uiaId: 'syssettings',
-        ctxtId: 'DisplaySettingsReset',
-        contextSeq: 2
+        it('No closes the confirmation without changing the language', () => {
+            const before = settings.currentLanguageId;
+            setBackStack(['syssettings', 'ChangeLanguage'], ['syssettings', 'LanguageConf']);
+            dialogs.languageConfActive = true;
+            app.handleLanguageConfNo(createMockWs());
+            assert.equal(dialogs.languageConfActive, false);
+            assert.deepEqual(backStack(), ['ChangeLanguage']);
+            assert.equal(settings.currentLanguageId, before);
+        });
     });
 
-    const ws = createMockWs();
-    syssettingsApp.handleDisplayResetNo(ws);
-
-    assert.equal(syssettingsApp.dialogs.displayResetConfirmActive, false);
-    assert.equal(navigationState.goBackStack.length, 1);
-});
-
-test('sendClockState/sendDevicesState report the cached clock and device fields', () => {
-    let ws = createMockWs();
-    syssettingsApp.sendClockState(ws);
-    assert.deepEqual(
-        ws.messages.map((m) => m.msgId),
-        ['GPSSync', 'TimeZone', 'DayLightSavingsTime', 'NaviStatus']
-    );
-
-    ws = createMockWs();
-    syssettingsApp.sendDevicesState(ws);
-    assert.ok(ws.messages.some((m) => m.msgId === 'AppleCarPlayAvailable'));
-    assert.ok(ws.messages.some((m) => m.msgId === 'AndroidAutoSettings'));
-});
-
-test('clock setting handlers persist gps sync, time zone, DST and clock offset', () => {
-    withStubbedSave(() => {
-        syssettingsApp.handleSetGpsSync({ payload: { enableGpsSync: true } });
-        assert.equal(settings.currentSettings.gpsSync, true);
-
-        syssettingsApp.handleSetTimeZone({ payload: { timeZone: 12 } });
-        assert.equal(settings.currentSettings.timeZoneIndex, 12);
-
-        syssettingsApp.handleSetDaylightSavingTime({ payload: { enable: true } });
-        assert.equal(settings.currentSettings.daylightSavingTime, true);
-
-        const nowSeconds = Math.round(Date.now() / 1000);
-        syssettingsApp.handleSetTime({ payload: { u32TimestampSec: nowSeconds + 3600 } });
-        assert.ok(Math.abs(settings.currentSettings.clockOffsetSeconds - 3600) < 2);
+    describe('units', () => {
+        it('time format, temperature and distance units are saved', () => {
+            app.handleSetTimeFormat({ payload: { formatTime: 'hrs24' } });
+            assert.equal(current.timeFormat, 'hrs24');
+            app.handleSetUnitsTemperature({ payload: { unitsTemperature: 'Celsius' } });
+            assert.equal(current.temperatureUnit, 'Celsius');
+            app.handleSetUnitsDistance({ payload: { unitsDistance: 'Kilometers' } });
+            assert.equal(current.distanceUnit, 'Kilometers');
+            assert.equal(fixture.saves, 3);
+        });
     });
-});
 
-test('handleSelectChangeLanguage opens the language list and reports the active language', () => {
-    const ws = createMockWs();
-    syssettingsApp.handleSelectChangeLanguage(ws, 'syssettings');
+    describe('display', () => {
+        it('the display state reports the cached display fields', () => {
+            assert.deepEqual(sentBy(app.sendDisplayState), [
+                'DayNightMode',
+                'Brightness',
+                'Contrast',
+                'DisplayOverTemperature'
+            ]);
+        });
 
-    const ctxtChg = ws.messages.find((m) => m.msgType === 'ctxtChg');
-    assert.equal(ctxtChg.ctxtId, 'ChangeLanguage');
-    assert.ok(ws.messages.some((m) => m.msgId === 'LanguageSupported'));
-});
+        it('day/night mode, brightness and contrast are saved', () => {
+            app.handleSetDisplayDayNight({ payload: { displayDayNightAuto: 'Night' } });
+            assert.equal(current.displayDayNightMode, 'Night');
+            app.handleSetDisplayBrightness({ payload: { brightnessValue: 5 } });
+            assert.equal(current.displayBrightness, 5);
+            app.handleSetDisplayContrast({ payload: { ContrastValue: -2 } });
+            assert.equal(current.displayContrast, -2);
+        });
 
-test('handleSelectAgreementsAndDisclaimers opens the AgreementsDisclaimers context (no "And")', () => {
-    const ws = createMockWs();
-    syssettingsApp.handleSelectAgreementsAndDisclaimers(ws, 'syssettings');
+        it('Reset asks first, and Yes restores the defaults', () => {
+            setBackStack(['syssettings', 'DisplayTab']);
+            current.displayBrightness = 9;
+            const ws = createMockWs();
+            app.handleDisplayReset(ws);
+            assert.equal(dialogs.displayResetConfirmActive, true);
 
-    const ctxtChg = ws.messages.find((m) => m.msgType === 'ctxtChg');
-    assert.equal(ctxtChg.ctxtId, 'AgreementsDisclaimers');
-});
+            app.handleDisplayResetYes(ws);
+            assert.equal(current.displayBrightness, 0);
+            assert.deepEqual(backStack(), ['DisplayTab']);
+        });
 
-test('factory reset confirm/no/yes flow returns to the System tab without wiping settings', (t) => {
-    t.mock.timers.enable({ apis: ['setTimeout'] });
-    navigationState.goBackStack.push({ uiaId: 'syssettings', ctxtId: 'SystemTab', contextSeq: 1 });
-    const ws = createMockWs();
+        it('Reset + No returns to the previous context without resetting', () => {
+            current.displayBrightness = 9;
+            setBackStack(['syssettings', 'DisplayTab'], ['syssettings', 'DisplaySettingsReset']);
+            app.handleDisplayResetNo(createMockWs());
+            assert.equal(dialogs.displayResetConfirmActive, false);
+            assert.deepEqual(backStack(), ['DisplayTab']);
+            assert.equal(current.displayBrightness, 9);
+        });
+    });
 
-    syssettingsApp.handleSelectFactoryReset(ws, 'syssettings');
-    assert.equal(syssettingsApp.dialogs.factoryResetConfirmActive, true);
+    describe('clock and devices', () => {
+        it('the clock and devices states report their cached fields', () => {
+            assert.deepEqual(sentBy(app.sendClockState), [
+                'GPSSync',
+                'TimeZone',
+                'DayLightSavingsTime',
+                'NaviStatus'
+            ]);
+            const devices = sentBy(app.sendDevicesState);
+            assert.ok(devices.includes('AppleCarPlayAvailable'));
+            assert.ok(devices.includes('AndroidAutoSettings'));
+        });
 
-    syssettingsApp.handleFactoryResetNo(ws);
-    assert.equal(syssettingsApp.dialogs.factoryResetConfirmActive, false);
-    assert.equal(navigationState.goBackStack.length, 1);
+        it('GPS sync, time zone, daylight saving time and the clock offset are saved', () => {
+            app.handleSetGpsSync({ payload: { enableGpsSync: true } });
+            assert.equal(current.gpsSync, true);
+            app.handleSetTimeZone({ payload: { timeZone: 12 } });
+            assert.equal(current.timeZoneIndex, 12);
+            app.handleSetDaylightSavingTime({ payload: { enable: true } });
+            assert.equal(current.daylightSavingTime, true);
 
-    syssettingsApp.handleSelectFactoryReset(ws, 'syssettings');
-    syssettingsApp.handleFactoryResetYes(ws);
-    assert.equal(syssettingsApp.dialogs.factoryResetProgressActive, true);
-    t.mock.timers.tick(2000);
-    assert.equal(syssettingsApp.dialogs.factoryResetProgressActive, false);
-    assert.equal(navigationState.goBackStack.length, 1);
-    assert.equal(navigationState.goBackStack[0].ctxtId, 'SystemTab');
+            const nowSeconds = Math.round(Date.now() / 1000);
+            app.handleSetTime({ payload: { u32TimestampSec: nowSeconds + 3600 } });
+            assert.ok(Math.abs(current.clockOffsetSeconds - 3600) < 2);
+        });
+    });
+
+    describe('system', () => {
+        it('Agreements and Disclaimers opens the AgreementsDisclaimers context (no "And")', () => {
+            const ws = createMockWs();
+            app.handleSelectAgreementsAndDisclaimers(ws, 'syssettings');
+            assert.deepEqual(contexts(ws), ['AgreementsDisclaimers']);
+        });
+
+        it('factory reset: No and Yes both return to the System tab, without wiping settings', (t) => {
+            const timers = useMockTimers(t);
+            setBackStack(['syssettings', 'SystemTab']);
+            current.timeFormat = 'hrs24';
+            const ws = createMockWs();
+
+            app.handleSelectFactoryReset(ws, 'syssettings');
+            assert.equal(dialogs.factoryResetConfirmActive, true);
+            app.handleFactoryResetNo(ws);
+            assert.equal(dialogs.factoryResetConfirmActive, false);
+            assert.deepEqual(backStack(), ['SystemTab']);
+
+            app.handleSelectFactoryReset(ws, 'syssettings');
+            app.handleFactoryResetYes(ws);
+            assert.equal(dialogs.factoryResetProgressActive, true);
+            timers.tick(2000);
+            assert.equal(dialogs.factoryResetProgressActive, false);
+            assert.deepEqual(backStack(), ['SystemTab']);
+            assert.equal(current.timeFormat, 'hrs24');
+        });
+    });
 });

@@ -1,41 +1,44 @@
-const test = require('node:test');
+const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
 const startup = require('./startup');
 const settings = require('./settings');
-const { createMockWs } = require('../../testing/mockWs');
+const { createMockWs, msgIds, payloadOf } = require('../../testing/mockWs');
+const { useCleanState } = require('../../testing/state');
 
-test('sendStartupSettings sends region, language, units and vehicle identity', () => {
-    const ws = createMockWs();
+describe('startup', () => {
+    useCleanState();
 
-    startup.sendStartupSettings(ws);
+    it('the startup settings carry region, language, units and vehicle identity', () => {
+        const ws = createMockWs();
+        startup.sendStartupSettings(ws);
+        for (const msgId of [
+            'Region',
+            'KeyboardLanguage',
+            'TimeFormat',
+            'Temperature',
+            'Distance',
+            'VehicleType',
+            'Destination',
+            'LanguageSupported'
+        ]) {
+            assert.ok(msgIds(ws).includes(msgId), msgId);
+        }
+        assert.equal(payloadOf(ws, 'Region').RegionValue, settings.HARDWARE_CONFIG.region);
+    });
 
-    const msgIds = ws.messages.map((m) => m.msgId);
-    assert.ok(msgIds.includes('Region'));
-    assert.ok(msgIds.includes('KeyboardLanguage'));
-    assert.ok(msgIds.includes('TimeFormat'));
-    assert.ok(msgIds.includes('Temperature'));
-    assert.ok(msgIds.includes('Distance'));
-    assert.ok(msgIds.includes('VehicleType'));
-    assert.ok(msgIds.includes('Destination'));
-    assert.ok(msgIds.includes('LanguageSupported'));
+    describe('the clock', () => {
+        it('sends the current epoch moved by clockOffsetSeconds', (t) => {
+            t.mock.method(Date, 'now', () => 1_700_000_000_000);
+            settings.currentSettings.clockOffsetSeconds = 3600;
+            const ws = createMockWs();
+            startup.sendCurrentTimeEpoch(ws);
+            assert.deepEqual(msgIds(ws), ['SendCurrentTimeEpoch']);
+            assert.equal(payloadOf(ws, 'SendCurrentTimeEpoch').u32TimestampSec, 1_700_003_600);
+        });
 
-    const region = ws.messages.find((m) => m.msgId === 'Region');
-    assert.equal(region.params.payload.RegionValue, settings.HARDWARE_CONFIG.region);
-});
-
-test('sendCurrentTimeEpoch sends a msg with an epoch offset by clockOffsetSeconds', () => {
-    const ws = createMockWs();
-    const before = Math.round(Date.now() / 1000);
-
-    startup.sendCurrentTimeEpoch(ws);
-
-    assert.equal(ws.messages.length, 1);
-    assert.equal(ws.messages[0].msgId, 'SendCurrentTimeEpoch');
-    const sentTimestamp = ws.messages[0].params.payload.u32TimestampSec;
-    assert.ok(sentTimestamp >= before + settings.currentSettings.clockOffsetSeconds - 1);
-});
-
-test('CLOCK_SYNC_INTERVAL_MS matches the firmware clock refresh interval', () => {
-    assert.equal(startup.CLOCK_SYNC_INTERVAL_MS, 60000);
+        it('is refreshed as often as the firmware refreshes it', () => {
+            assert.equal(startup.CLOCK_SYNC_INTERVAL_MS, 60000);
+        });
+    });
 });

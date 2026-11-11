@@ -9,7 +9,7 @@
         "format:check": "prettier --check .",
         "lint": "eslint .",
         "lint:fix": "eslint . --fix",
-        "test": "node --test",
+        "test": "node --test --test-timeout=10000",
         "check": "npm run format:check && npm run lint && npm test"
     },
     "dependencies": {

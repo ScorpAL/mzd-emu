@@ -1,108 +1,63 @@
-const test = require('node:test');
+const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
 const ecoenergyApp = require('./ecoenergyApp');
-const navigationState = require('../state/navigationState');
-const { createMockWs } = require('../../testing/mockWs');
+const { createMockWs, contexts, contextPaths, msgIds } = require('../../testing/mockWs');
+const { useCleanState, setBackStack, backStack } = require('../../testing/state');
 
-test.afterEach(() => {
-    navigationState.goBackStack.length = 0;
-});
+describe('ecoenergyApp', () => {
+    useCleanState();
 
-test('handleSelectEcoEnergy sends the full state and opens ControlStatus', () => {
-    const ws = createMockWs();
-
-    ecoenergyApp.handleSelectEcoEnergy(ws);
-
-    assert.ok(ws.messages.some((m) => m.msgId === 'FuelType'));
-    assert.ok(ws.messages.some((m) => m.msgId === 'TreeData'));
-    const ctxtChg = ws.messages.find((m) => m.msgType === 'ctxtChg');
-    assert.equal(ctxtChg.ctxtId, 'ControlStatus');
-});
-
-test('handleSelectSwitchView cycles ControlStatus -> Effectiveness -> FuelConsumption -> ControlStatus', () => {
-    navigationState.goBackStack.push({
-        uiaId: 'ecoenergy',
-        ctxtId: 'ControlStatus',
-        contextSeq: 1
+    it('SelectEcoEnergy sends the full state and opens ControlStatus', () => {
+        const ws = createMockWs();
+        ecoenergyApp.handleSelectEcoEnergy(ws);
+        assert.ok(msgIds(ws).includes('FuelType'));
+        assert.ok(msgIds(ws).includes('TreeData'));
+        assert.deepEqual(contexts(ws), ['ControlStatus']);
     });
-    let ws = createMockWs();
-    ecoenergyApp.handleSelectSwitchView(ws);
-    let ctxtChg = ws.messages.find((m) => m.msgType === 'ctxtChg');
-    assert.equal(ctxtChg.ctxtId, 'Effectiveness');
 
-    navigationState.goBackStack.push({
-        uiaId: 'ecoenergy',
-        ctxtId: 'Effectiveness',
-        contextSeq: 2
+    it('SwitchView cycles ControlStatus -> Effectiveness -> FuelConsumption -> ControlStatus', () => {
+        for (const [from, to] of [
+            ['ControlStatus', 'Effectiveness'],
+            ['Effectiveness', 'FuelConsumption'],
+            ['FuelConsumption', 'ControlStatus']
+        ]) {
+            setBackStack(['ecoenergy', from]);
+            const ws = createMockWs();
+            ecoenergyApp.handleSelectSwitchView(ws);
+            assert.deepEqual(contexts(ws), [to], from);
+        }
     });
-    ws = createMockWs();
-    ecoenergyApp.handleSelectSwitchView(ws);
-    ctxtChg = ws.messages.find((m) => m.msgType === 'ctxtChg');
-    assert.equal(ctxtChg.ctxtId, 'FuelConsumption');
 
-    navigationState.goBackStack.push({
-        uiaId: 'ecoenergy',
-        ctxtId: 'FuelConsumption',
-        contextSeq: 3
+    it('SelectSourceMenu switches to the system Applications screen', () => {
+        const ws = createMockWs();
+        ecoenergyApp.handleSelectSourceMenu(ws);
+        assert.deepEqual(contextPaths(ws), ['system/Applications']);
     });
-    ws = createMockWs();
-    ecoenergyApp.handleSelectSwitchView(ws);
-    ctxtChg = ws.messages.find((m) => m.msgType === 'ctxtChg');
-    assert.equal(ctxtChg.ctxtId, 'ControlStatus');
-});
 
-test('isResetConfirmActive reflects the top of the navigation stack', () => {
-    assert.equal(ecoenergyApp.isResetConfirmActive(), false);
+    describe('reset', () => {
+        it('the confirmation is active only while it is on top of the stack', () => {
+            assert.equal(ecoenergyApp.isResetConfirmActive(), false, 'empty stack');
+            setBackStack(['ecoenergy', 'ControlStatus']);
+            assert.equal(ecoenergyApp.isResetConfirmActive(), false);
+            setBackStack(['ecoenergy', 'ControlStatus'], ['ecoenergy', 'ResetConfirm']);
+            assert.equal(ecoenergyApp.isResetConfirmActive(), true);
+        });
 
-    navigationState.goBackStack.push({
-        uiaId: 'ecoenergy',
-        ctxtId: 'ControlStatus',
-        contextSeq: 1
+        it('Cancel returns to the page that was shown before the confirmation', () => {
+            setBackStack(['ecoenergy', 'Effectiveness'], ['ecoenergy', 'ResetConfirm']);
+            const ws = createMockWs();
+            ecoenergyApp.handleResetCancel(ws);
+            assert.deepEqual(backStack(), ['Effectiveness']);
+            assert.deepEqual(contexts(ws), ['Effectiveness']);
+        });
+
+        it('Yes reports the reset and returns to the previous page', () => {
+            setBackStack(['ecoenergy', 'FuelConsumption'], ['ecoenergy', 'ResetConfirm']);
+            const ws = createMockWs();
+            ecoenergyApp.handleResetConfirmYes(ws);
+            assert.ok(msgIds(ws).includes('ResetSuccess'));
+            assert.equal(contexts(ws).at(-1), 'FuelConsumption');
+        });
     });
-    assert.equal(ecoenergyApp.isResetConfirmActive(), false);
-
-    navigationState.goBackStack.push({ uiaId: 'ecoenergy', ctxtId: 'ResetConfirm', contextSeq: 2 });
-    assert.equal(ecoenergyApp.isResetConfirmActive(), true);
-});
-
-test('handleResetCancel returns to the page that was active before the reset confirm dialog', () => {
-    navigationState.goBackStack.push({
-        uiaId: 'ecoenergy',
-        ctxtId: 'Effectiveness',
-        contextSeq: 1
-    });
-    navigationState.goBackStack.push({ uiaId: 'ecoenergy', ctxtId: 'ResetConfirm', contextSeq: 2 });
-
-    const ws = createMockWs();
-    ecoenergyApp.handleResetCancel(ws);
-
-    assert.equal(navigationState.goBackStack.length, 1);
-    const ctxtChg = ws.messages.find((m) => m.msgType === 'ctxtChg');
-    assert.equal(ctxtChg.ctxtId, 'Effectiveness');
-});
-
-test('handleResetConfirmYes sends a reset success message and returns to the previous page', () => {
-    navigationState.goBackStack.push({
-        uiaId: 'ecoenergy',
-        ctxtId: 'FuelConsumption',
-        contextSeq: 1
-    });
-    navigationState.goBackStack.push({ uiaId: 'ecoenergy', ctxtId: 'ResetConfirm', contextSeq: 2 });
-
-    const ws = createMockWs();
-    ecoenergyApp.handleResetConfirmYes(ws);
-
-    assert.ok(ws.messages.some((m) => m.msgId === 'ResetSuccess'));
-    const ctxtChg = ws.messages.filter((m) => m.msgType === 'ctxtChg').pop();
-    assert.equal(ctxtChg.ctxtId, 'FuelConsumption');
-});
-
-test('handleSelectSourceMenu switches to the system Applications screen', () => {
-    const ws = createMockWs();
-    ecoenergyApp.handleSelectSourceMenu(ws);
-
-    const ctxtChg = ws.messages.find((m) => m.msgType === 'ctxtChg');
-    assert.equal(ctxtChg.uiaId, 'system');
-    assert.equal(ctxtChg.ctxtId, 'Applications');
 });

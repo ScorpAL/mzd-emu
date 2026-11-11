@@ -1,394 +1,286 @@
-const test = require('node:test');
+const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
 const vehsettingsApp = require('./vehsettingsApp');
 const settings = require('../services/settings');
-const navigationState = require('../state/navigationState');
-const { createMockWs } = require('../../testing/mockWs');
-const { resetDialogs } = require('../../testing/dialogs');
+const { createMockWs, contexts, messageOf, payloadOf } = require('../../testing/mockWs');
+const { useCleanState, setBackStack, backStack } = require('../../testing/state');
+const { useMockTimers } = require('../../testing/timers');
 
-function withStubbedSave(fn) {
-    const originalSave = settings.saveUserSettings;
-    settings.saveUserSettings = () => {};
-    try {
-        fn();
-    } finally {
-        settings.saveUserSettings = originalSave;
-    }
+const app = vehsettingsApp;
+const { dialogs } = app;
+const current = settings.currentSettings;
+
+// The msgIds a "send...State" function sends, in order.
+function sentBy(send) {
+    const ws = createMockWs();
+    send(ws);
+    return ws.messages.map((m) => m.msgId);
 }
 
-test.afterEach(() => {
-    navigationState.goBackStack.length = 0;
-    resetDialogs();
-});
+describe('vehsettingsApp', () => {
+    useCleanState();
 
-test('sendVehicleFeatureInstalled/sendVehicleCapabilityState/sendHudType/sendNavigationAvailability/sendIgnitionOn all report state', () => {
-    const ws = createMockWs();
-    vehsettingsApp.sendVehicleFeatureInstalled(ws);
-    vehsettingsApp.sendVehicleCapabilityState(ws);
-    vehsettingsApp.sendHudType(ws);
-    vehsettingsApp.sendNavigationAvailability(ws);
-    vehsettingsApp.sendIgnitionOn(ws);
+    describe('vehicle state', () => {
+        it('reports installed features, capabilities, HUD type, navigation and ignition', () => {
+            const ws = createMockWs();
+            app.sendVehicleFeatureInstalled(ws);
+            app.sendVehicleCapabilityState(ws);
+            app.sendHudType(ws);
+            app.sendNavigationAvailability(ws);
+            app.sendIgnitionOn(ws);
 
-    assert.ok(ws.messages.length > 10);
-    assert.ok(ws.messages.some((m) => m.msgId === 'HudType'));
-    assert.ok(ws.messages.some((m) => m.msgId === 'NAVIEquipped'));
-    assert.ok(
-        ws.messages.some((m) => m.msgId === 'IgnitionStatus' && m.params.payload.evData === 1)
-    );
-});
-
-test('sendHudState translates the numeric hudRotation into a Level_* label', () => {
-    withStubbedSave(() => {
-        const original = settings.currentSettings.hudRotation;
-        settings.currentSettings.hudRotation = -2;
-
-        const ws = createMockWs();
-        vehsettingsApp.sendHudState(ws);
-
-        const rotation = ws.messages.find((m) => m.msgId === 'GetHUDRotation');
-        assert.equal(rotation.params.payload.evData, 'Level_minus_2');
-
-        settings.currentSettings.hudRotation = original;
-    });
-});
-
-test('handleHudEvent persists simple HUD fields and reports unknown events', () => {
-    withStubbedSave(() => {
-        const ws = createMockWs();
-        assert.equal(
-            vehsettingsApp.handleHudEvent(ws, 'SetHudHeight', { payload: { evData: 5 } }),
-            undefined
-        );
-        assert.equal(settings.currentSettings.hudHeight, 5);
-
-        assert.equal(
-            vehsettingsApp.handleHudEvent(ws, 'SetHUDRotation', {
-                payload: { evData: 'Level_plus_2' }
-            }),
-            undefined
-        );
-        assert.equal(settings.currentSettings.hudRotation, 2);
-
-        assert.equal(vehsettingsApp.handleHudEvent(ws, 'UnknownEvent', {}), false);
-    });
-});
-
-test('handleHudEvent SelectDisplayInformation opens the HUD display info context', () => {
-    const ws = createMockWs();
-    const handled = vehsettingsApp.handleHudEvent(ws, 'SelectDisplayInformation', {});
-
-    assert.equal(handled, true);
-    const ctxtChg = ws.messages.find((m) => m.msgType === 'ctxtChg');
-    assert.equal(ctxtChg.ctxtId, 'HUDDisplayInformation');
-});
-
-test('HUD reset: GoHUDReset opens the confirm dialog and Yes restores every HUD default', () => {
-    withStubbedSave(() => {
-        navigationState.goBackStack.push({ uiaId: 'vehsettings', ctxtId: 'HUDTab', contextSeq: 1 });
-        settings.currentSettings.hudHeight = 3;
-        settings.currentSettings.hudDisplay = 0;
-
-        const ws = createMockWs();
-        vehsettingsApp.handleGoHudReset(ws);
-        assert.equal(vehsettingsApp.dialogs.hudResetConfirmActive, true);
-
-        vehsettingsApp.handleHudResetYes(ws);
-
-        assert.equal(settings.currentSettings.hudHeight, 0);
-        assert.equal(settings.currentSettings.hudDisplay, 1);
-        assert.equal(vehsettingsApp.dialogs.hudResetConfirmActive, false);
-        assert.equal(vehsettingsApp.dialogs.hudResetProgressActive, false);
-        assert.equal(navigationState.goBackStack.length, 1);
-        assert.equal(navigationState.goBackStack[0].ctxtId, 'HUDTab');
-    });
-});
-
-test('HUD reset: No dismisses without changing any values', () => {
-    withStubbedSave(() => {
-        navigationState.goBackStack.push({ uiaId: 'vehsettings', ctxtId: 'HUDTab', contextSeq: 1 });
-        settings.currentSettings.hudHeight = 3;
-
-        const ws = createMockWs();
-        vehsettingsApp.handleGoHudReset(ws);
-        vehsettingsApp.handleHudResetNo(ws);
-
-        assert.equal(settings.currentSettings.hudHeight, 3);
-        assert.equal(vehsettingsApp.dialogs.hudResetConfirmActive, false);
-        settings.currentSettings.hudHeight = 0;
-    });
-});
-
-test('Display info reset restores navigation/street defaults', () => {
-    withStubbedSave(() => {
-        navigationState.goBackStack.push({ uiaId: 'vehsettings', ctxtId: 'HUDTab', contextSeq: 1 });
-        settings.currentSettings.hudStreetInformation = 'Street_Never';
-
-        const ws = createMockWs();
-        vehsettingsApp.handleDisplayInfoReset(ws);
-        assert.equal(vehsettingsApp.dialogs.hudDisplayInfoResetConfirmActive, true);
-
-        vehsettingsApp.handleDisplayInfoResetYes(ws);
-        assert.equal(settings.currentSettings.hudStreetInformation, 'Street_Always');
-        assert.equal(vehsettingsApp.dialogs.hudDisplayInfoResetConfirmActive, false);
-    });
-});
-
-test('sendDoorLockState and sendSpeedAlarmState report cached values', () => {
-    let ws = createMockWs();
-    vehsettingsApp.sendDoorLockState(ws);
-    assert.deepEqual(
-        ws.messages.map((m) => m.msgId),
-        [
-            'GetAutoDoorLockAT6',
-            'GetKeylessLockBeepVol',
-            'GetAutoRelockTimer',
-            'GetUnlockMode',
-            'GetWalkAwayLock',
-            'GetHandsFreeLiftgate'
-        ]
-    );
-
-    withStubbedSave(() => {
-        const original = settings.currentSettings.speedAlarmOnOff;
-        settings.currentSettings.speedAlarmOnOff = 'SpeedAlarm_Off';
-        ws = createMockWs();
-        vehsettingsApp.sendSpeedAlarmState(ws);
-        assert.equal(ws.messages[0].params.payload.evData, 1);
-        settings.currentSettings.speedAlarmOnOff = original;
-    });
-});
-
-test('handleVehicleSettingsEvent persists door lock and speed alarm fields, and reports unknown events', () => {
-    withStubbedSave(() => {
-        const ws = createMockWs();
-        assert.equal(
-            vehsettingsApp.handleVehicleSettingsEvent(ws, 'SetWalkAwayLock', {
-                payload: { evData: 'WalkAwayLock_On' }
-            }),
-            true
-        );
-        assert.equal(settings.currentSettings.walkAwayLock, 'WalkAwayLock_On');
-
-        assert.equal(
-            vehsettingsApp.handleVehicleSettingsEvent(ws, 'SetSpeedAlarmOnOff', {
-                payload: { evData: 'SpeedAlarm_On' }
-            }),
-            true
-        );
-        assert.equal(settings.currentSettings.speedAlarmOnOff, 'SpeedAlarm_On');
-
-        assert.equal(vehsettingsApp.handleVehicleSettingsEvent(ws, 'UnknownEvent', {}), false);
-    });
-});
-
-test('Door lock reset restores every door lock default', () => {
-    withStubbedSave(() => {
-        navigationState.goBackStack.push({
-            uiaId: 'vehsettings',
-            ctxtId: 'VehicleSettingsTab',
-            contextSeq: 1
+            assert.ok(ws.messages.length > 10);
+            assert.ok(messageOf(ws, 'HudType'));
+            assert.ok(messageOf(ws, 'NAVIEquipped'));
+            assert.equal(payloadOf(ws, 'IgnitionStatus').evData, 1);
         });
-        settings.currentSettings.walkAwayLock = 'WalkAwayLock_On';
-
-        const ws = createMockWs();
-        vehsettingsApp.handleGoDoorLockReset(ws);
-        assert.equal(vehsettingsApp.dialogs.doorLockResetConfirmActive, true);
-
-        vehsettingsApp.handleDoorLockResetYes(ws);
-        assert.equal(settings.currentSettings.walkAwayLock, 'WalkAwayLock_Off');
-        assert.equal(vehsettingsApp.dialogs.doorLockResetConfirmActive, false);
-        assert.equal(navigationState.goBackStack.length, 1);
     });
-});
 
-test('sendSafetyState reports normalized safety values, and SetBSMSystem/BuzzerVolume refresh BSM state', () => {
-    withStubbedSave(() => {
-        settings.currentSettings.bsmSystem = 'BSM_Weird';
-        settings.currentSettings.scbsMode = 'SBS_On';
-
-        let ws = createMockWs();
-        vehsettingsApp.sendSafetyState(ws);
-        const bsmMsg = ws.messages.find((m) => m.msgId === 'BSMSystem_Status');
-        assert.equal(bsmMsg.params.payload.evData, 'BSM_On');
-        const scbsMsg = ws.messages.find((m) => m.msgId === 'GetSCBS');
-        assert.equal(scbsMsg.params.payload.evData, 'SCBS_On');
-
-        ws = createMockWs();
-        vehsettingsApp.handleSafetySettingsEvent(ws, 'SetBSMBuzzerVolume', {
-            payload: { evData: 'BSM_Vol_Middle' }
-        });
-        assert.equal(settings.currentSettings.bsmBuzzerVolume, 'BSM_Vol_Middle');
-        assert.ok(ws.messages.some((m) => m.msgId === 'BSMSystem_Status'));
-        assert.ok(ws.messages.some((m) => m.msgId === 'GetBSMBuzzerVolume'));
-    });
-});
-
-test('handleSafetySettingsEvent persists simple safety fields', () => {
-    withStubbedSave(() => {
-        const ws = createMockWs();
-        assert.equal(
-            vehsettingsApp.handleSafetySettingsEvent(ws, 'SetDRSS', {
-                payload: { evData: 'DRSS_On' }
-            }),
-            true
-        );
-        assert.equal(settings.currentSettings.drssMode, 'DRSS_On');
-
-        assert.equal(vehsettingsApp.handleSafetySettingsEvent(ws, 'UnknownEvent', {}), false);
-    });
-});
-
-test('handleSafetySettingsEvent SetBSMSystem toggles when the payload carries no explicit on/off', () => {
-    withStubbedSave(() => {
-        settings.currentSettings.bsmSystem = 'BSM_On';
-        const ws = createMockWs();
-
-        vehsettingsApp.handleSafetySettingsEvent(ws, 'SetBSMSystem', {
-            payload: { evData: 'toggle' }
+    describe('HUD', () => {
+        it('the HUD state turns the numeric rotation into a Level_* label', () => {
+            current.hudRotation = -2;
+            const ws = createMockWs();
+            app.sendHudState(ws);
+            assert.equal(payloadOf(ws, 'GetHUDRotation').evData, 'Level_minus_2');
         });
 
-        assert.equal(settings.currentSettings.bsmSystem, 'BSM_Off');
-    });
-});
+        it('handleHudEvent saves simple HUD fields and reports unknown events', () => {
+            const ws = createMockWs();
+            assert.equal(
+                app.handleHudEvent(ws, 'SetHudHeight', { payload: { evData: 5 } }),
+                undefined
+            );
+            assert.equal(current.hudHeight, 5);
 
-test('DRSS reset (synchronous) restores DRSS mode/distance defaults', () => {
-    withStubbedSave(() => {
-        navigationState.goBackStack.push({
-            uiaId: 'vehsettings',
-            ctxtId: 'SafetyTab',
-            contextSeq: 1
+            const rotation = { payload: { evData: 'Level_plus_2' } };
+            assert.equal(app.handleHudEvent(ws, 'SetHUDRotation', rotation), undefined);
+            assert.equal(current.hudRotation, 2);
+
+            assert.equal(app.handleHudEvent(ws, 'UnknownEvent', {}), false);
         });
-        settings.currentSettings.drssMode = 'DRSS_On';
 
-        const ws = createMockWs();
-        vehsettingsApp.handleGoDRSSReset(ws);
-        assert.equal(vehsettingsApp.dialogs.drssResetConfirmActive, true);
-
-        vehsettingsApp.handleDrssResetYes(ws);
-        assert.equal(settings.currentSettings.drssMode, 'DRSS_Off');
-        assert.equal(vehsettingsApp.dialogs.drssResetConfirmActive, false);
-    });
-});
-
-test('LAS reset (async) restores LAS/LDWS defaults after the progress delay', (t) => {
-    t.mock.timers.enable({ apis: ['setTimeout'] });
-    withStubbedSave(() => {
-        navigationState.goBackStack.push({
-            uiaId: 'vehsettings',
-            ctxtId: 'SafetyTab',
-            contextSeq: 1
+        it('SelectDisplayInformation opens the HUD display information', () => {
+            const ws = createMockWs();
+            assert.equal(app.handleHudEvent(ws, 'SelectDisplayInformation', {}), true);
+            assert.deepEqual(contexts(ws), ['HUDDisplayInformation']);
         });
-        navigationState.goBackStack.push({ uiaId: 'vehsettings', ctxtId: 'LAS', contextSeq: 2 });
-        settings.currentSettings.lasIntervention = 'LAS_Intervention_Off';
 
-        const ws = createMockWs();
-        vehsettingsApp.handleGoLasReset(ws);
-        vehsettingsApp.handleLasResetYes(ws);
-        assert.equal(vehsettingsApp.dialogs.lasResetProgressActive, true);
+        it('Reset asks first, and Yes restores every HUD default', () => {
+            setBackStack(['vehsettings', 'HUDTab']);
+            current.hudHeight = 3;
+            current.hudDisplay = 0;
 
-        t.mock.timers.tick(800);
+            const ws = createMockWs();
+            app.handleGoHudReset(ws);
+            assert.equal(dialogs.hudResetConfirmActive, true);
+            app.handleHudResetYes(ws);
 
-        assert.equal(settings.currentSettings.lasIntervention, 'LAS_Intervention_On');
-        assert.equal(vehsettingsApp.dialogs.lasResetProgressActive, false);
-        assert.equal(
-            navigationState.goBackStack[navigationState.goBackStack.length - 1].ctxtId,
-            'SafetyTab'
-        );
-    });
-});
-
-test('sendTurnSettingsState/handleTurnSettingsEvent/turn reset flow', () => {
-    withStubbedSave(() => {
-        let ws = createMockWs();
-        vehsettingsApp.sendTurnSettingsState(ws);
-        assert.deepEqual(
-            ws.messages.map((m) => m.msgId),
-            ['Get3FlashTurnSignal', 'GetTurnSignalIndicatorVolume']
-        );
-
-        ws = createMockWs();
-        vehsettingsApp.handleTurnSettingsEvent(ws, 'Set3FlashTurnSignal', {
-            payload: { evData: 'Three_Flash_On' }
+            assert.equal(current.hudHeight, 0);
+            assert.equal(current.hudDisplay, 1);
+            assert.equal(dialogs.hudResetConfirmActive, false);
+            assert.equal(dialogs.hudResetProgressActive, false);
+            assert.deepEqual(backStack(), ['HUDTab']);
         });
-        assert.equal(settings.currentSettings.threeFlashTurnSignal, 'Three_Flash_On');
-        assert.equal(vehsettingsApp.handleTurnSettingsEvent(ws, 'Unknown', {}), false);
 
-        navigationState.goBackStack.push({
-            uiaId: 'vehsettings',
-            ctxtId: 'VehicleSettingsTab',
-            contextSeq: 1
+        it('Reset + No changes nothing', () => {
+            setBackStack(['vehsettings', 'HUDTab']);
+            current.hudHeight = 3;
+            const ws = createMockWs();
+            app.handleGoHudReset(ws);
+            app.handleHudResetNo(ws);
+            assert.equal(current.hudHeight, 3);
+            assert.equal(dialogs.hudResetConfirmActive, false);
         });
-        vehsettingsApp.handleGoTurnReset(ws);
-        vehsettingsApp.handleTurnResetYes(ws);
-        assert.equal(settings.currentSettings.threeFlashTurnSignal, 'Three_Flash_Off');
-        assert.equal(vehsettingsApp.dialogs.turnResetConfirmActive, false);
-    });
-});
 
-test('sendLightingState/handleLightingSettingsEvent/lighting reset flow', () => {
-    withStubbedSave(() => {
-        let ws = createMockWs();
-        vehsettingsApp.sendLightingState(ws);
-        assert.ok(ws.messages.some((m) => m.msgId === 'GetILB'));
-        assert.ok(ws.messages.some((m) => m.msgId === 'GetDRL'));
-
-        ws = createMockWs();
-        assert.equal(
-            vehsettingsApp.handleLightingSettingsEvent(ws, 'SetHBC', {
-                payload: { evData: 'HBC_On' }
-            }),
-            true
-        );
-        assert.equal(settings.currentSettings.lightingHighBeamControl, 'HBC_On');
-        assert.equal(vehsettingsApp.handleLightingSettingsEvent(ws, 'Unknown', {}), false);
-
-        navigationState.goBackStack.push({
-            uiaId: 'vehsettings',
-            ctxtId: 'VehicleSettingsTab',
-            contextSeq: 1
+        it('the display information reset restores the navigation and street defaults', () => {
+            setBackStack(['vehsettings', 'HUDTab']);
+            current.hudStreetInformation = 'Street_Never';
+            const ws = createMockWs();
+            app.handleDisplayInfoReset(ws);
+            assert.equal(dialogs.hudDisplayInfoResetConfirmActive, true);
+            app.handleDisplayInfoResetYes(ws);
+            assert.equal(current.hudStreetInformation, 'Street_Always');
+            assert.equal(dialogs.hudDisplayInfoResetConfirmActive, false);
         });
-        vehsettingsApp.handleGoLightingReset(ws);
-        vehsettingsApp.handleLightingResetYes(ws);
-        assert.equal(settings.currentSettings.lightingHighBeamControl, 'HBC_Off');
-        assert.equal(vehsettingsApp.dialogs.lightingResetConfirmActive, false);
     });
-});
 
-test('simple Go* navigation handlers open their expected contexts', () => {
-    const cases = [
-        ['handleGoSBS', 'SBS'],
-        ['handleGoSBS_SCBS', 'SBS_SCBS'],
-        ['handleGoFOW', 'FOW'],
-        ['handleGoDoorLock', 'DoorLock'],
-        ['handleGoUnlockMode', 'UnlockMode'],
-        ['handleGoDoorLockMode', 'DoorLockMode'],
-        ['handleGoKeylessLockBeepVol', 'KeylessLockBeepVol'],
-        ['handleGoDoorRelockTime', 'DoorRelockTime'],
-        ['handleGoTurnSettings', 'TurnSettings'],
-        ['handleGoLighting', 'Lighting']
-    ];
+    describe('door lock and speed alarm', () => {
+        it('the door lock state reports every cached value', () => {
+            assert.deepEqual(sentBy(app.sendDoorLockState), [
+                'GetAutoDoorLockAT6',
+                'GetKeylessLockBeepVol',
+                'GetAutoRelockTimer',
+                'GetUnlockMode',
+                'GetWalkAwayLock',
+                'GetHandsFreeLiftgate'
+            ]);
+        });
 
-    cases.forEach(([handlerName, expectedCtxtId]) => {
-        const ws = createMockWs();
-        vehsettingsApp[handlerName](ws);
-        const ctxtChg = ws.messages.find((m) => m.msgType === 'ctxtChg');
-        assert.equal(ctxtChg.ctxtId, expectedCtxtId, handlerName);
+        it('the speed alarm state reports Off as 1', () => {
+            current.speedAlarmOnOff = 'SpeedAlarm_Off';
+            const ws = createMockWs();
+            app.sendSpeedAlarmState(ws);
+            assert.equal(ws.messages[0].params.payload.evData, 1);
+        });
+
+        it('handleVehicleSettingsEvent saves door lock and speed alarm fields, and reports unknown events', () => {
+            const ws = createMockWs();
+            const set = (eventId, evData) =>
+                app.handleVehicleSettingsEvent(ws, eventId, { payload: { evData } });
+            assert.equal(set('SetWalkAwayLock', 'WalkAwayLock_On'), true);
+            assert.equal(current.walkAwayLock, 'WalkAwayLock_On');
+            assert.equal(set('SetSpeedAlarmOnOff', 'SpeedAlarm_On'), true);
+            assert.equal(current.speedAlarmOnOff, 'SpeedAlarm_On');
+            assert.equal(app.handleVehicleSettingsEvent(ws, 'UnknownEvent', {}), false);
+        });
+
+        it('the door lock reset restores every door lock default', () => {
+            setBackStack(['vehsettings', 'VehicleSettingsTab']);
+            current.walkAwayLock = 'WalkAwayLock_On';
+            const ws = createMockWs();
+            app.handleGoDoorLockReset(ws);
+            assert.equal(dialogs.doorLockResetConfirmActive, true);
+            app.handleDoorLockResetYes(ws);
+            assert.equal(current.walkAwayLock, 'WalkAwayLock_Off');
+            assert.equal(dialogs.doorLockResetConfirmActive, false);
+            assert.deepEqual(backStack(), ['VehicleSettingsTab']);
+        });
     });
-});
 
-test('handleOpenSafetyContext and handleSelectSpeedLimitInfo pick the HUD-aware SLI context', () => {
-    const original = settings.HARDWARE_CONFIG.hudType;
+    describe('safety', () => {
+        it('the safety state reports normalized values', () => {
+            current.bsmSystem = 'BSM_Weird';
+            current.scbsMode = 'SBS_On';
+            const ws = createMockWs();
+            app.sendSafetyState(ws);
+            assert.equal(payloadOf(ws, 'BSMSystem_Status').evData, 'BSM_On');
+            assert.equal(payloadOf(ws, 'GetSCBS').evData, 'SCBS_On');
+        });
 
-    settings.HARDWARE_CONFIG.hudType = 'WHUD_color';
-    let ws = createMockWs();
-    vehsettingsApp.handleSelectSpeedLimitInfo(ws);
-    assert.equal(ws.messages.find((m) => m.msgType === 'ctxtChg').ctxtId, 'SLI_WHUD');
+        it('handleSafetySettingsEvent saves simple fields and reports unknown events', () => {
+            const ws = createMockWs();
+            const drss = { payload: { evData: 'DRSS_On' } };
+            assert.equal(app.handleSafetySettingsEvent(ws, 'SetDRSS', drss), true);
+            assert.equal(current.drssMode, 'DRSS_On');
+            assert.equal(app.handleSafetySettingsEvent(ws, 'UnknownEvent', {}), false);
+        });
 
-    settings.HARDWARE_CONFIG.hudType = 'None';
-    ws = createMockWs();
-    vehsettingsApp.handleSelectSpeedLimitInfo(ws);
-    assert.equal(ws.messages.find((m) => m.msgType === 'ctxtChg').ctxtId, 'SLI');
+        it('SetBSMBuzzerVolume saves the volume and refreshes the BSM state', () => {
+            const ws = createMockWs();
+            app.handleSafetySettingsEvent(ws, 'SetBSMBuzzerVolume', {
+                payload: { evData: 'BSM_Vol_Middle' }
+            });
+            assert.equal(current.bsmBuzzerVolume, 'BSM_Vol_Middle');
+            assert.ok(messageOf(ws, 'BSMSystem_Status'));
+            assert.ok(messageOf(ws, 'GetBSMBuzzerVolume'));
+        });
 
-    settings.HARDWARE_CONFIG.hudType = original;
+        it('SetBSMSystem toggles when the payload carries no explicit on/off', () => {
+            current.bsmSystem = 'BSM_On';
+            app.handleSafetySettingsEvent(createMockWs(), 'SetBSMSystem', {
+                payload: { evData: 'toggle' }
+            });
+            assert.equal(current.bsmSystem, 'BSM_Off');
+        });
+
+        it('the DRSS reset restores the DRSS defaults at once', () => {
+            setBackStack(['vehsettings', 'SafetyTab']);
+            current.drssMode = 'DRSS_On';
+            const ws = createMockWs();
+            app.handleGoDRSSReset(ws);
+            assert.equal(dialogs.drssResetConfirmActive, true);
+            app.handleDrssResetYes(ws);
+            assert.equal(current.drssMode, 'DRSS_Off');
+            assert.equal(dialogs.drssResetConfirmActive, false);
+        });
+
+        it('the LAS reset restores the LAS/LDWS defaults after the progress delay', (t) => {
+            const timers = useMockTimers(t);
+            setBackStack(['vehsettings', 'SafetyTab'], ['vehsettings', 'LAS']);
+            current.lasIntervention = 'LAS_Intervention_Off';
+
+            const ws = createMockWs();
+            app.handleGoLasReset(ws);
+            app.handleLasResetYes(ws);
+            assert.equal(dialogs.lasResetProgressActive, true);
+
+            timers.tick(800);
+            assert.equal(current.lasIntervention, 'LAS_Intervention_On');
+            assert.equal(dialogs.lasResetProgressActive, false);
+            assert.equal(backStack().at(-1), 'SafetyTab');
+        });
+
+        it('the Speed Limit Information screen depends on the HUD type', () => {
+            for (const [hudType, expected] of [
+                ['WHUD_color', 'SLI_WHUD'],
+                ['None', 'SLI']
+            ]) {
+                settings.HARDWARE_CONFIG.hudType = hudType;
+                const ws = createMockWs();
+                app.handleSelectSpeedLimitInfo(ws);
+                assert.deepEqual(contexts(ws), [expected], hudType);
+            }
+        });
+    });
+
+    describe('turn signals and lighting', () => {
+        it('the turn signal state, its events and its reset', () => {
+            assert.deepEqual(sentBy(app.sendTurnSettingsState), [
+                'Get3FlashTurnSignal',
+                'GetTurnSignalIndicatorVolume'
+            ]);
+
+            const ws = createMockWs();
+            app.handleTurnSettingsEvent(ws, 'Set3FlashTurnSignal', {
+                payload: { evData: 'Three_Flash_On' }
+            });
+            assert.equal(current.threeFlashTurnSignal, 'Three_Flash_On');
+            assert.equal(app.handleTurnSettingsEvent(ws, 'Unknown', {}), false);
+
+            setBackStack(['vehsettings', 'VehicleSettingsTab']);
+            app.handleGoTurnReset(ws);
+            app.handleTurnResetYes(ws);
+            assert.equal(current.threeFlashTurnSignal, 'Three_Flash_Off');
+            assert.equal(dialogs.turnResetConfirmActive, false);
+        });
+
+        it('the lighting state, its events and its reset', () => {
+            const sent = sentBy(app.sendLightingState);
+            assert.ok(sent.includes('GetILB') && sent.includes('GetDRL'));
+
+            const ws = createMockWs();
+            const hbc = { payload: { evData: 'HBC_On' } };
+            assert.equal(app.handleLightingSettingsEvent(ws, 'SetHBC', hbc), true);
+            assert.equal(current.lightingHighBeamControl, 'HBC_On');
+            assert.equal(app.handleLightingSettingsEvent(ws, 'Unknown', {}), false);
+
+            setBackStack(['vehsettings', 'VehicleSettingsTab']);
+            app.handleGoLightingReset(ws);
+            app.handleLightingResetYes(ws);
+            assert.equal(current.lightingHighBeamControl, 'HBC_Off');
+            assert.equal(dialogs.lightingResetConfirmActive, false);
+        });
+    });
+
+    describe('navigation', () => {
+        it('the simple Go* handlers open their contexts', () => {
+            for (const [handlerName, expected] of [
+                ['handleGoSBS', 'SBS'],
+                ['handleGoSBS_SCBS', 'SBS_SCBS'],
+                ['handleGoFOW', 'FOW'],
+                ['handleGoDoorLock', 'DoorLock'],
+                ['handleGoUnlockMode', 'UnlockMode'],
+                ['handleGoDoorLockMode', 'DoorLockMode'],
+                ['handleGoKeylessLockBeepVol', 'KeylessLockBeepVol'],
+                ['handleGoDoorRelockTime', 'DoorRelockTime'],
+                ['handleGoTurnSettings', 'TurnSettings'],
+                ['handleGoLighting', 'Lighting']
+            ]) {
+                const ws = createMockWs();
+                app[handlerName](ws);
+                assert.equal(contexts(ws)[0], expected, handlerName);
+            }
+        });
+    });
 });

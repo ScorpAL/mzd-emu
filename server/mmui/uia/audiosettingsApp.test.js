@@ -1,89 +1,73 @@
-const test = require('node:test');
+const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
 const audiosettingsApp = require('./audiosettingsApp');
 const settings = require('../services/settings');
 const { createMockWs } = require('../../testing/mockWs');
+const { useCleanState } = require('../../testing/state');
 
-function withStubbedSave(fn) {
-    const originalSave = settings.saveUserSettings;
-    settings.saveUserSettings = () => {};
-    try {
-        fn();
-    } finally {
-        settings.saveUserSettings = originalSave;
-    }
-}
+const current = settings.currentSettings;
 
-test('sendSoundState reports every sound setting field', () => {
-    const ws = createMockWs();
+describe('audiosettingsApp', () => {
+    const fixture = useCleanState();
 
-    audiosettingsApp.sendSoundState(ws);
+    it('the sound state reports every sound setting', () => {
+        const ws = createMockWs();
+        audiosettingsApp.sendSoundState(ws);
+        assert.deepEqual(
+            ws.messages.map((m) => m.msgId),
+            [
+                'BoseAvailable',
+                'BassSetting',
+                'TrebleSetting',
+                'FaderSetting',
+                'BalanceSetting',
+                'AutoVolumeSetting',
+                'CenterPointSetting',
+                'AudioPilotSetting',
+                'BeepSettings',
+                'GuidanceVolSetting',
+                'GuidanceVolOnOff'
+            ]
+        );
+    });
 
-    const msgIds = ws.messages.map((m) => m.msgId);
-    assert.deepEqual(msgIds, [
-        'BoseAvailable',
-        'BassSetting',
-        'TrebleSetting',
-        'FaderSetting',
-        'BalanceSetting',
-        'AutoVolumeSetting',
-        'CenterPointSetting',
-        'AudioPilotSetting',
-        'BeepSettings',
-        'GuidanceVolSetting',
-        'GuidanceVolOnOff'
-    ]);
-});
-
-test('numeric audio handlers persist the requested value', () => {
-    withStubbedSave(() => {
-        const cases = [
+    describe('numeric settings', () => {
+        for (const [handlerName, payloadField, settingField] of [
             ['handleSetAudioBass', 'audioBass', 'soundBass'],
             ['handleSetAudioTreble', 'audioTreble', 'soundTreble'],
             ['handleSetAudioFader', 'audioFader', 'soundFade'],
             ['handleSetAudioBalance', 'audioBalance', 'soundBalance'],
             ['handleSetAudioAutoVolume', 'audioAutoVolume', 'soundAutoVolume'],
             ['handleSetAudioGuidanceVol', 'audioGuidanceVol', 'soundGuidanceVol']
-        ];
+        ]) {
+            it(`${handlerName} saves ${payloadField} as ${settingField}`, () => {
+                audiosettingsApp[handlerName]({ payload: { [payloadField]: 7 } });
+                assert.equal(current[settingField], 7);
+                assert.equal(fixture.saves, 1);
+            });
+        }
 
-        cases.forEach(([handlerName, payloadField, settingField]) => {
-            const original = settings.currentSettings[settingField];
-            audiosettingsApp[handlerName]({ payload: { [payloadField]: 7 } });
-            assert.equal(settings.currentSettings[settingField], 7, handlerName);
-            settings.currentSettings[settingField] = original;
+        it('a payload without its field changes nothing', () => {
+            const before = current.soundBass;
+            audiosettingsApp.handleSetAudioBass({ payload: {} });
+            audiosettingsApp.handleSetAudioBass({});
+            assert.equal(current.soundBass, before);
         });
     });
-});
 
-test('numeric audio handlers ignore payloads missing their field', () => {
-    withStubbedSave(() => {
-        const original = settings.currentSettings.soundBass;
-        audiosettingsApp.handleSetAudioBass({ payload: {} });
-        assert.equal(settings.currentSettings.soundBass, original);
-        audiosettingsApp.handleSetAudioBass({});
-        assert.equal(settings.currentSettings.soundBass, original);
-    });
-});
-
-test('boolean audio handlers persist On/Off strings', () => {
-    withStubbedSave(() => {
-        const cases = [
+    describe('On/Off settings', () => {
+        for (const [handlerName, payloadField, settingField] of [
             ['handleSetAudioCenterpoint', 'audioCenterpoint', 'soundCenterPoint'],
             ['handleSetAudioAudioPilot', 'audioAudioPilot', 'soundAudioPilot'],
             ['handleSetBeepOnOff', 'enableBeepOnOff', 'soundBeep']
-        ];
-
-        cases.forEach(([handlerName, payloadField, settingField]) => {
-            const original = settings.currentSettings[settingField];
-
-            audiosettingsApp[handlerName]({ payload: { [payloadField]: true } });
-            assert.equal(settings.currentSettings[settingField], 'On', handlerName);
-
-            audiosettingsApp[handlerName]({ payload: { [payloadField]: false } });
-            assert.equal(settings.currentSettings[settingField], 'Off', handlerName);
-
-            settings.currentSettings[settingField] = original;
-        });
+        ]) {
+            it(`${handlerName} saves true/false as On/Off`, () => {
+                audiosettingsApp[handlerName]({ payload: { [payloadField]: true } });
+                assert.equal(current[settingField], 'On');
+                audiosettingsApp[handlerName]({ payload: { [payloadField]: false } });
+                assert.equal(current[settingField], 'Off');
+            });
+        }
     });
 });
