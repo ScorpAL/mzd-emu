@@ -247,8 +247,9 @@ function handleSetTireRotationOnOff(ws, params) {
     }
 }
 
-function handleSelectSettingIntervalValue(ws, params) {
-    const value = params && params.payload ? params.payload.settingValue : null;
+// The oil change "Setting Interval" value, from SetOilChange (oilChange) or from the On/Off
+// checkbox of SelectSettingInterval (settingValue). Off asks first; the others apply at once.
+function applyOilChangeSetting(ws, value) {
     if (value === 'Off') {
         handleSelectOff(ws, 'OilChangeDetail');
     } else if (value === 'Fixed' || value === 'Flexible' || value === 'On') {
@@ -258,15 +259,12 @@ function handleSelectSettingIntervalValue(ws, params) {
     }
 }
 
+function handleSelectSettingIntervalValue(ws, params) {
+    applyOilChangeSetting(ws, params && params.payload ? params.payload.settingValue : null);
+}
+
 function handleSetOilChange(ws, params) {
-    const value = params && params.payload ? params.payload.oilChange : null;
-    if (value === 'Off') {
-        handleSelectOff(ws, 'OilChangeDetail');
-    } else if (value === 'Fixed' || value === 'Flexible' || value === 'On') {
-        settings.currentSettings.oilMaintSetting = value;
-        settings.saveUserSettings();
-        sendMaintenanceState(ws);
-    }
+    applyOilChangeSetting(ws, params && params.payload ? params.payload.oilChange : null);
 }
 
 function handleSetTimeValue(ws, params) {
