@@ -142,8 +142,11 @@ function createServer() {
                 return;
             }
 
-            res.writeHead(200, { 'Content-Type': getContentType(filePath) });
             const stream = fs.createReadStream(filePath);
+            // The 200 header waits until the file is open, so a file that cannot be read still gets a 500.
+            stream.on('open', () => {
+                res.writeHead(200, { 'Content-Type': getContentType(filePath) });
+            });
             stream.on('error', (error) => {
                 logger.error('ui-server', 'Could not stream %s: %s', filePath, error.message);
                 if (!res.headersSent) {
@@ -158,11 +161,15 @@ function createServer() {
     });
 }
 
-function start() {
+// Starts serving. `port` defaults to runtime.json's uiPort (0 = any free port, the tests use it);
+// the log, the banner and the browser get the port really listened on. `open` is the browser
+// opener (see launcher/open-browser.js, which opens nothing unless start-all asked for it).
+function start({ port = CONFIG.port, open = openBrowser } = {}) {
     const server = createServer();
     server.on('error', (error) => logger.error('ui-server', 'Server error: %s', error.message));
-    server.listen(CONFIG.port, function () {
-        logger.info('ui-server', 'Serving the GUI on http://localhost:%d/', CONFIG.port);
+    server.listen(port, function () {
+        const actualPort = server.address().port;
+        logger.info('ui-server', 'Serving the GUI on http://localhost:%d/', actualPort);
         logger.debug(
             'ui-server',
             'Serving %s, injecting %s into %s',
@@ -170,15 +177,18 @@ function start() {
             path.basename(CONFIG.polyfillsFile),
             CONFIG.injectIntoPaths.join(', ')
         );
-        const guiUrl = `http://localhost:${CONFIG.port}${CONFIG.guiPath}`;
+        const guiUrl = `http://localhost:${actualPort}${CONFIG.guiPath}`;
         logger.banner('Open in your browser:', guiUrl);
-        openBrowser(guiUrl);
+        open(guiUrl);
     });
     return server;
 }
 
 if (require.main === module) {
-    start();
+    // A port that cannot be listened on ends the process; it must not count as a clean exit.
+    start().on('error', () => {
+        process.exitCode = 1;
+    });
 }
 
 module.exports = {
