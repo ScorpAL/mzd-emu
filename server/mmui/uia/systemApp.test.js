@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const systemApp = require('./systemApp');
 const coldStart = require('../services/coldStart');
+const settings = require('../services/settings');
 const navigationState = require('../state/navigationState');
 const vehicleEquipment = require('../services/vehicleEquipment');
 const { createMockWs } = require('../../testing/mockWs');
@@ -88,6 +89,58 @@ test('sendApplicationsState reports every application tile status', () => {
     assert.ok(appNames.includes('ecoenergy'));
     assert.ok(appNames.includes('schedmaint'));
     assert.ok(appNames.includes('carplay'));
+});
+
+function stitcherMessages(ws) {
+    return ws.messages.filter(
+        (m) =>
+            (m.msgId === 'StatusMenu' && m.params.payload.statusMenu.appName === 'stitcher') ||
+            (m.msgId === 'StatusMenuVisible' && m.params.payload.appName === 'stitcher')
+    );
+}
+
+test('Stitcher is available, and no visibility message is sent, for the configured vehicle', () => {
+    const ws = createMockWs();
+
+    systemApp.sendApplicationsState(ws);
+
+    const msgs = stitcherMessages(ws);
+    assert.equal(systemApp.isStitcherBlockedForThisVehicle(), false);
+    assert.equal(msgs.length, 1);
+    assert.equal(msgs[0].msgId, 'StatusMenu');
+    assert.equal(msgs[0].params.payload.statusMenu.appStatus, 'Available');
+});
+
+test('Stitcher is hidden and unavailable only for destination CA with vehicle model J03W', () => {
+    const config = settings.HARDWARE_CONFIG;
+    const original = { destinationCode: config.destinationCode, vehicleType: config.vehicleType };
+    try {
+        config.destinationCode = 'SETTINGS_Destination_CA';
+        config.vehicleType = 'SETTINGS_VehicleModelType_J03W';
+        const ws = createMockWs();
+
+        systemApp.sendApplicationsState(ws);
+
+        const msgs = stitcherMessages(ws);
+        assert.equal(systemApp.isStitcherBlockedForThisVehicle(), true);
+        assert.equal(
+            msgs.find((m) => m.msgId === 'StatusMenuVisible').params.payload.state,
+            'Invisible'
+        );
+        assert.equal(
+            msgs.find((m) => m.msgId === 'StatusMenu').params.payload.statusMenu.appStatus,
+            'Unavailable'
+        );
+
+        config.vehicleType = 'SETTINGS_VehicleModelType_J78A';
+        assert.equal(systemApp.isStitcherBlockedForThisVehicle(), false);
+        config.vehicleType = 'SETTINGS_VehicleModelType_J03W';
+        config.destinationCode = 'SETTINGS_Destination_EU';
+        assert.equal(systemApp.isStitcherBlockedForThisVehicle(), false);
+    } finally {
+        config.destinationCode = original.destinationCode;
+        config.vehicleType = original.vehicleType;
+    }
 });
 
 test('handleSelectApplications refreshes state and opens Applications', () => {

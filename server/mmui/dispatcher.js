@@ -11,6 +11,7 @@ const btpairingApp = require('./uia/btpairingApp');
 const netmgmtApp = require('./uia/netmgmtApp');
 const schedmaintApp = require('./uia/schedmaintApp');
 const ecoenergyApp = require('./uia/ecoenergyApp');
+const stitcherApp = require('./uia/stitcherApp');
 
 // Every application, plus the common one for the shared Global.* events, owns its events: each
 // exports `events`, a table of eventId -> handler(ws, params, uiaId, eventId), like the
@@ -19,6 +20,7 @@ const applications = [
     commonApp,
     systemApp,
     ecoenergyApp,
+    stitcherApp,
     schedmaintApp,
     syssettingsApp,
     audiosettingsApp,
@@ -54,6 +56,10 @@ const handleMmuiEvent = function (ws, uiaId, eventId, params) {
     // Set... events are the user changing something; show them next to the screen changes.
     if (/^Set[A-Z]/.test(eventId)) {
         logger.info('setting', '%s %s', eventId, describePayload(params));
+    }
+    // Any other user action leaves the simulated Stitcher connection attempt.
+    if (eventId !== 'SelectStitcher') {
+        stitcherApp.cancelConnect(ws);
     }
     if (Object.prototype.hasOwnProperty.call(eventTable, eventId)) {
         eventTable[eventId](ws, params, uiaId, eventId);

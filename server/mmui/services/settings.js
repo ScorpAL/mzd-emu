@@ -73,6 +73,10 @@ requireAllowedValue('vehicleType', VEHICLE_CONFIG.vehicleType, [
 requireAllowedValue('hudType', VEHICLE_CONFIG.hudType, ['CHUD_mono', 'CHUD_color', 'WHUD_color']);
 requireAllowedValue('navigationSdCard', VEHICLE_CONFIG.navigationSdCard, ['On', 'Off']);
 requireAllowedValue('bose', VEHICLE_CONFIG.bose, ['On', 'Off']);
+requireAllowedValue('phoneBluetoothConnection', VEHICLE_CONFIG.phoneBluetoothConnection, [
+    'On',
+    'Off'
+]);
 requireAllowedValue('appleCarPlayAvailable', VEHICLE_CONFIG.appleCarPlayAvailable, ['On', 'Off']);
 requireAllowedValue('appleWirelessCarPlayAvailable', VEHICLE_CONFIG.appleWirelessCarPlayAvailable, [
     'On',
@@ -516,6 +520,10 @@ const HARDWARE_CONFIG = {
 
     // Settings -> Devices capability/current-connection signals. These are not user
     // preferences; real MMUI pushes them from the phone-projection/network stacks.
+    // Whether the paired phone is connected over Bluetooth (its audio profile, which the system application
+    // keeps as uiaSystem_phoneAudioProfileConnStatus). It is separate from the Bluetooth switch of the head unit:
+    // Bluetooth can be On while the phone's own Bluetooth is off. "On" = connected. See stitcherApp.js.
+    phoneBluetoothConnection: VEHICLE_CONFIG.phoneBluetoothConnection,
     appleCarPlayAvailable: VEHICLE_CONFIG.appleCarPlayAvailable,
     appleWirelessCarPlayAvailable: VEHICLE_CONFIG.appleWirelessCarPlayAvailable,
     appleCarPlayConnection: VEHICLE_CONFIG.appleCarPlayConnection,

@@ -8,6 +8,7 @@ const vehsettingsApp = require('./vehsettingsApp');
 const btpairingApp = require('./btpairingApp');
 const schedmaintApp = require('./schedmaintApp');
 const ecoenergyApp = require('./ecoenergyApp');
+const stitcherApp = require('./stitcherApp');
 
 // Counterpart of libjciuiacommon.so (uiaid 0): the Global.* events that every dialog shares.
 // The firmware sends them to the application that owns the open dialog. Here each application
@@ -18,7 +19,14 @@ function isCommon(uiaId) {
 }
 
 // Applications with dialogs, in the order their dialogs are tried.
-const DIALOG_OWNERS = [systemApp, sysupdateApp, syssettingsApp, vehsettingsApp, schedmaintApp];
+const DIALOG_OWNERS = [
+    systemApp,
+    sysupdateApp,
+    syssettingsApp,
+    vehsettingsApp,
+    schedmaintApp,
+    stitcherApp
+];
 
 // The handler of the first open dialog that answers `answer` ("yes" or "no"), or null.
 function findOpenDialog(answer) {

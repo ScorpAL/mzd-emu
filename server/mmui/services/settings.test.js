@@ -21,6 +21,10 @@ test('HARDWARE_CONFIG mirrors config/vehicle.json and is not part of currentSett
     assert.equal(settings.HARDWARE_CONFIG.region, vehicleConfig.region);
     assert.equal(settings.HARDWARE_CONFIG.vehicleType, vehicleConfig.vehicleType);
     assert.equal(settings.HARDWARE_CONFIG.hudType, vehicleConfig.hudType);
+    assert.equal(
+        settings.HARDWARE_CONFIG.phoneBluetoothConnection,
+        vehicleConfig.phoneBluetoothConnection
+    );
     assert.equal(settings.currentSettings.region, undefined);
     assert.equal(settings.DEFAULT_SETTINGS.region, undefined);
 });

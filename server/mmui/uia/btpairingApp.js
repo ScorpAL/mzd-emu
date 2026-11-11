@@ -86,6 +86,10 @@ function handleCancel(ws) {
 // Report the emulator's mock phone to the status bar.
 function sendPhoneConnectedStatus(ws) {
     const bluetoothOn = settings.currentSettings.bluetooth === 'On';
+    // The mock phone is in the list while Bluetooth is On, but it is connected only when its own Bluetooth is "on"
+    // (config/vehicle.json, phoneBluetoothConnection).
+    const phoneConnected =
+        bluetoothOn && settings.HARDWARE_CONFIG.phoneBluetoothConnection === 'On';
     ws.send(
         JSON.stringify({
             msgType: 'msg',
@@ -99,8 +103,8 @@ function sendPhoneConnectedStatus(ws) {
                             ? [
                                   {
                                       itemLabel: 'Mock Phone',
-                                      status: 1,
-                                      connect_disconnect_Success: 1
+                                      status: phoneConnected ? 1 : 0,
+                                      connect_disconnect_Success: phoneConnected ? 1 : 0
                                   }
                               ]
                             : []

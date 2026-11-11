@@ -182,6 +182,35 @@ function sendApplicationStatus(ws, appName, visible, available) {
     sendStatusMenu(ws, appName, available);
 }
 
+// Stitcher entertainment item. The real car decides this in libjciuiastitcher.so
+// (stitcher_dbus_InformAboutOurVisibility / ...OurAvailability, read from the firmware's
+// disassembly):
+//   - the item is hidden AND unavailable only for Destination 12 (CA) together with BLM
+//     VehicleModelType 7 (the UIA enum name for that value is J03W);
+//   - otherwise it is available, once the blm_ira_stitcher and offboard Stitcher services
+//     are up and the audio flag is set (the emulator treats all of these as always true;
+//     no phone is needed);
+//   - when it is not hidden the car sends no StatusMenuVisible at all, so the item keeps
+//     the GUI default (visible).
+// Both values come from config/vehicle.json through settings.HARDWARE_CONFIG.
+const STITCHER_BLOCKED_DESTINATION = 'SETTINGS_Destination_CA';
+const STITCHER_BLOCKED_VEHICLE_TYPE = 'SETTINGS_VehicleModelType_J03W';
+
+function isStitcherBlockedForThisVehicle() {
+    return (
+        settings.HARDWARE_CONFIG.destinationCode === STITCHER_BLOCKED_DESTINATION &&
+        settings.HARDWARE_CONFIG.vehicleType === STITCHER_BLOCKED_VEHICLE_TYPE
+    );
+}
+
+function sendStitcherState(ws) {
+    if (isStitcherBlockedForThisVehicle()) {
+        sendApplicationStatus(ws, 'stitcher', false, false);
+    } else {
+        sendStatusMenu(ws, 'stitcher', true);
+    }
+}
+
 function sendApplicationsState(ws) {
     sendSyssettingsMsg(ws, 'VehicleConfigData', { evData: 'New' });
 
@@ -195,6 +224,8 @@ function sendApplicationsState(ws) {
 
     sendApplicationStatus(ws, 'carplay', true, false);
     sendApplicationStatus(ws, 'androidauto', true, false);
+
+    sendStitcherState(ws);
 
     sendApplicationStatus(ws, 'xmdata', false, false);
     sendApplicationStatus(ws, 'hdtrafficimage', false, false);
@@ -222,6 +253,16 @@ function handleSelectWarnGuide(ws) {
 
 function handleSelectSchedMaint(ws) {
     schedmaintApp.handleSelectSchedMaint(ws);
+}
+
+// "Connect" in the No Device Connected window (system/NoDevice): the window closes and Settings > Devices > Bluetooth opens.
+function handleSelectConnect(ws) {
+    const stack = navigationState.goBackStack;
+    const top = stack[stack.length - 1];
+    if (top && top.uiaId === 'system' && top.ctxtId === 'NoDevice') {
+        stack.pop();
+    }
+    btpairingApp.handleSelectBluetooth(ws);
 }
 
 function handleSelectEntertainment(ws) {
@@ -301,6 +342,7 @@ const events = {
     'Global.IntentSettingsTab': (ws, params) => handleIntentSettingsTab(ws, params),
     SelectApplications: (ws) => handleSelectApplications(ws),
     SelectEntertainment: (ws) => handleSelectEntertainment(ws),
+    SelectConnect: (ws) => handleSelectConnect(ws),
     SelectCommunication: (ws) => handleSelectCommunication(ws),
     SelectNavigation: (ws) => handleSelectNavigation(ws),
     SelectEcoEnergy: (ws) => handleSelectEcoEnergy(ws),
@@ -331,12 +373,14 @@ module.exports = {
     isSystemWarningOpen: isSystemWarningOpen,
     dismissSystemWarning: dismissSystemWarning,
     sendApplicationsState: sendApplicationsState,
+    isStitcherBlockedForThisVehicle: isStitcherBlockedForThisVehicle,
     handleSelectApplications: handleSelectApplications,
     handleSelectEcoEnergy: handleSelectEcoEnergy,
     handleSelectVehicleStatusMonitor: handleSelectVehicleStatusMonitor,
     handleSelectWarnGuide: handleSelectWarnGuide,
     handleSelectSchedMaint: handleSelectSchedMaint,
     handleSelectEntertainment: handleSelectEntertainment,
+    handleSelectConnect: handleSelectConnect,
     handleSelectCommunication: handleSelectCommunication,
     handleSelectNavigation: handleSelectNavigation,
     handleSelectSettings: handleSelectSettings,

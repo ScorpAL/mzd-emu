@@ -5,6 +5,7 @@
     "hudType": "WHUD_color",
     "navigationSdCard": "On",
     "bose": "On",
+    "phoneBluetoothConnection": "On",
     "appleCarPlayAvailable": "On",
     "appleWirelessCarPlayAvailable": "Off",
     "appleCarPlayConnection": "Off",
