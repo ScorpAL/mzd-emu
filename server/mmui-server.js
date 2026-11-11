@@ -8,11 +8,19 @@ const handleMmuiEvent = require('./mmui/dispatcher');
 
 const runtime = require('./config/runtime.json');
 
+// The ports come from config/runtime.json. MZD_<NAME>_PORT (for example MZD_GUIIFM_PORT) overrides one of
+// them, so a second copy, such as the one the tests start, does not collide with a running emulator.
+function portFor(name, configured) {
+    const text = process.env[`MZD_${name.toUpperCase()}_PORT`];
+    const port = Number(text);
+    return text && Number.isInteger(port) && port >= 0 && port <= 65535 ? port : configured;
+}
+
 const PORTS = {
-    guiifm: runtime.guiifmPort,
-    appsdk: runtime.appsdkPort,
-    dbapi: runtime.dbapiPort,
-    control: runtime.controlPort
+    guiifm: portFor('guiifm', runtime.guiifmPort),
+    appsdk: portFor('appsdk', runtime.appsdkPort),
+    dbapi: portFor('dbapi', runtime.dbapiPort),
+    control: portFor('control', runtime.controlPort)
 };
 
 function parseMessage(message, scope) {
