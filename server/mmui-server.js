@@ -10,8 +10,8 @@ const runtime = require('./config/runtime.json');
 
 // The ports come from config/runtime.json. MZD_<NAME>_PORT (for example MZD_GUIIFM_PORT) overrides one of
 // them, so a second copy, such as the one the tests start, does not collide with a running emulator.
-function portFor(name, configured) {
-    const text = process.env[`MZD_${name.toUpperCase()}_PORT`];
+function portFor(name, configured, env = process.env) {
+    const text = env[`MZD_${name.toUpperCase()}_PORT`];
     const port = Number(text);
     return text && Number.isInteger(port) && port >= 0 && port <= 65535 ? port : configured;
 }
@@ -47,12 +47,10 @@ function attachPassiveEndpoint(server, scope) {
     });
 }
 
-function createGuiifmServer() {
-    const server = new WebSocketServer({ port: PORTS.guiifm });
-
+function attachGuiifmEndpoint(server, emulatorControls) {
     server.on('connection', (ws) => {
         logger.success('gui', 'connected');
-        if (runtime.emulatorControls) {
+        if (emulatorControls) {
             temperatureService.attach(ws);
         }
         startup.sendCurrentTimeEpoch(ws);
@@ -82,65 +80,120 @@ function createGuiifmServer() {
                 return;
             }
             logger.debug('guiifm', 'Received event=%s uiaId=%s', data.eventId, data.uiaId);
-            handleMmuiEvent(ws, data.uiaId, data.eventId, data.params);
+            // A handler that throws must not take the emulator down (an exception thrown from
+            // a ws listener is uncaught: the process would exit, and the socket stays wedged).
+            try {
+                handleMmuiEvent(ws, data.uiaId, data.eventId, data.params);
+            } catch (error) {
+                logger.error(
+                    'guiifm',
+                    'Event %s of %s failed: %s',
+                    data.eventId,
+                    data.uiaId,
+                    error.stack
+                );
+            }
         });
     });
-
-    return server;
 }
 
 // The GUI socket and the emulator controls matter to the user; the other two are never used.
 const QUIET_SCOPES = ['appsdk', 'dbapi'];
 
-function listen(server, scope, port) {
-    const log = QUIET_SCOPES.includes(scope) ? logger.debug : logger.info;
-    server.on('listening', () => log(scope, 'Listening on ws://localhost:%d', port));
-    server.on('error', (error) => logger.error(scope, 'Server error: %s', error.message));
-}
-
-const servers = [
-    { scope: 'guiifm', server: createGuiifmServer(), port: PORTS.guiifm },
-    { scope: 'appsdk', server: new WebSocketServer({ port: PORTS.appsdk }), port: PORTS.appsdk },
-    { scope: 'dbapi', server: new WebSocketServer({ port: PORTS.dbapi }), port: PORTS.dbapi }
-];
-
-// The emulator's own controls (temperature slider) are off unless runtime.json asks for them.
-if (runtime.emulatorControls) {
-    servers.push({
-        scope: 'control',
-        server: createControlServer(PORTS.control),
-        port: PORTS.control
+// Resolves with the port the server got once it listens (with port 0 the system picks a free one),
+// rejects if it cannot listen (for example, the port is taken).
+function listening(server, scope) {
+    return new Promise((resolve, reject) => {
+        const onError = (error) => {
+            server.off('listening', onListening);
+            reject(new Error(`${scope}: ${error.message}`, { cause: error }));
+        };
+        const onListening = () => {
+            server.off('error', onError);
+            server.on('error', (error) => logger.error(scope, 'Server error: %s', error.message));
+            const { port } = server.address();
+            const log = QUIET_SCOPES.includes(scope) ? logger.debug : logger.info;
+            log(scope, 'Listening on ws://localhost:%d', port);
+            resolve(port);
+        };
+        server.once('error', onError);
+        server.once('listening', onListening);
     });
 }
 
-attachPassiveEndpoint(servers[1].server, 'appsdk');
-attachPassiveEndpoint(servers[2].server, 'dbapi');
-servers.forEach(({ server, scope, port }) => listen(server, scope, port));
+function closeServer(server) {
+    return new Promise((resolve) => {
+        server.close(() => resolve());
+        // ws does not close connected clients itself; without this close() waits
+        // for them forever and the process (and its clock sync timers) stays alive.
+        server.clients.forEach((client) => client.terminate());
+    });
+}
 
-function close() {
-    return Promise.all(
-        servers.map(
-            ({ server }) =>
-                new Promise((resolve) => {
-                    server.close(() => resolve());
-                    // ws does not close connected clients itself; without this close() waits
-                    // for them forever and the process (and its clock sync timers) stays alive.
-                    server.clients.forEach((client) => client.terminate());
-                })
-        )
+// Starts the MMUI sockets. Nothing happens on require(); the caller decides the ports (0 = any free
+// one) and owns the result: `ports` are the ports actually listened on, `close()` stops everything.
+// If any socket cannot listen, the ones already started are closed and the promise rejects.
+async function createMmuiServers(options = {}) {
+    const ports = { ...PORTS, ...options.ports };
+    const emulatorControls = options.emulatorControls ?? runtime.emulatorControls;
+
+    const guiifm = new WebSocketServer({ port: ports.guiifm });
+    attachGuiifmEndpoint(guiifm, emulatorControls);
+    const appsdk = new WebSocketServer({ port: ports.appsdk });
+    attachPassiveEndpoint(appsdk, 'appsdk');
+    const dbapi = new WebSocketServer({ port: ports.dbapi });
+    attachPassiveEndpoint(dbapi, 'dbapi');
+    const servers = { guiifm, appsdk, dbapi };
+    // The emulator's own controls (temperature slider) are off unless runtime.json asks for them.
+    if (emulatorControls) {
+        servers.control = createControlServer(ports.control);
+    }
+
+    const entries = Object.entries(servers);
+    const close = () => Promise.all(entries.map(([, server]) => closeServer(server)));
+    const results = await Promise.allSettled(
+        entries.map(([scope, server]) => listening(server, scope))
     );
+    const failed = results.find((result) => result.status === 'rejected');
+    if (failed) {
+        await close();
+        throw failed.reason;
+    }
+    return {
+        ports: Object.fromEntries(entries.map(([scope], i) => [scope, results[i].value])),
+        servers,
+        close
+    };
 }
 
-async function shutdown(signal) {
-    logger.info('mmui', 'Stopping after %s', signal);
-    await close();
+async function main() {
+    let mmui = null;
+    // Installed first, so a signal during start-up also ends the process cleanly.
+    const shutdown = (signal) => {
+        logger.info('mmui', 'Stopping after %s', signal);
+        Promise.resolve(mmui && mmui.close()).finally(() => process.exit(0));
+    };
+    process.once('SIGINT', () => shutdown('SIGINT'));
+    process.once('SIGTERM', () => shutdown('SIGTERM'));
+    try {
+        mmui = await createMmuiServers();
+    } catch (error) {
+        logger.error('mmui', 'Could not start: %s', error.message);
+        process.exit(1);
+    }
+    // A parent that forked this process with an IPC channel (the tests) learns the real ports here.
+    if (process.send) {
+        process.send({ type: 'listening', ports: mmui.ports });
+    }
 }
 
-process.once('SIGINT', () => shutdown('SIGINT').finally(() => process.exit(0)));
-process.once('SIGTERM', () => shutdown('SIGTERM').finally(() => process.exit(0)));
+if (require.main === module) {
+    main();
+}
 
 module.exports = {
     PORTS,
+    portFor,
     parseMessage,
-    close
+    createMmuiServers
 };
