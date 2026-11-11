@@ -30,10 +30,10 @@ function defaultLevel(env) {
 }
 
 const state = {
-    threshold: LEVELS[defaultLevel(process.env)],
+    level: defaultLevel(process.env),
     out: (line) => console.log(line),
     now: () => new Date(),
-    last: null, // { key, repeats }
+    last: null, // { key, record, repeats }
     timer: null
 };
 
@@ -48,13 +48,16 @@ function flushRepeats() {
     state.timer = null;
     if (state.last && state.last.repeats > 0) {
         const times = state.last.repeats;
-        state.out(styleText('gray', `${' '.repeat(MESSAGE_COLUMN)}↳ repeated ${times} more times`));
+        state.out(
+            styleText('gray', `${' '.repeat(MESSAGE_COLUMN)}↳ repeated ${times} more times`),
+            { ...state.last.record, repeats: times }
+        );
     }
     state.last = null;
 }
 
 function write(level, scope, message, args) {
-    if (LEVELS[level] < state.threshold) {
+    if (LEVELS[level] < LEVELS[state.level]) {
         return;
     }
     const text = format(message, ...args);
@@ -65,15 +68,18 @@ function write(level, scope, message, args) {
     }
     flushRepeats();
     const style = STYLES[level];
+    // `out` also gets the line as data, so tests never depend on colours or column layout.
+    const record = { level, scope, message: text };
     state.out(
         [
             styleText('gray', clock()),
             styleText(style.color, style.label.padEnd(5)),
             styleText('cyan', scope.padEnd(SCOPE_WIDTH)),
             text
-        ].join(' ')
+        ].join(' '),
+        record
     );
-    state.last = { key, repeats: 0 };
+    state.last = { key, record, repeats: 0 };
     state.timer = setTimeout(flushRepeats, REPEAT_FLUSH_MS);
     state.timer.unref();
 }
@@ -88,14 +94,21 @@ function banner(title, text) {
         line(text),
         `╚${'═'.repeat(width - 2)}╝`
     ];
-    state.out(`\n${lines.map((l) => styleText(['green', 'bold'], l)).join('\n')}\n`);
+    state.out(`\n${lines.map((l) => styleText(['green', 'bold'], l)).join('\n')}\n`, {
+        level: 'banner',
+        scope: null,
+        message: `${title} ${text}`
+    });
 }
 
-// For tests: change where lines go, the level and the clock.
+// For tests: change where lines go, the level and the clock. `out(line, record)` gets the
+// formatted line and the same line as data, { level, scope, message } (plus `repeats` for the
+// "repeated N more times" line). Returns the previous options, for configure(previous).
 function configure(options) {
     flushRepeats();
+    const previous = { level: state.level, out: state.out, now: state.now };
     if (options.level) {
-        state.threshold = LEVELS[options.level];
+        state.level = options.level;
     }
     if (options.out) {
         state.out = options.out;
@@ -103,6 +116,7 @@ function configure(options) {
     if (options.now) {
         state.now = options.now;
     }
+    return previous;
 }
 
 process.on('exit', flushRepeats);
