@@ -2,7 +2,8 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
 const ecoenergyApp = require('./ecoenergyApp');
-const { createMockWs, contexts, contextPaths, msgIds } = require('../../testing/mockWs');
+const settings = require('../services/settings');
+const { createMockWs, contexts, contextPaths, msgIds, payloadOf } = require('../../testing/mockWs');
 const { useCleanState, setBackStack, backStack } = require('../../testing/state');
 
 describe('ecoenergyApp', () => {
@@ -59,5 +60,33 @@ describe('ecoenergyApp', () => {
             assert.ok(msgIds(ws).includes('ResetSuccess'));
             assert.equal(contexts(ws).at(-1), 'FuelConsumption');
         });
+    });
+
+    it('ecoEnergyData config switches between populated sample data and empty zeros', () => {
+        const prev = settings.HARDWARE_CONFIG.ecoEnergyData;
+        try {
+            settings.HARDWARE_CONFIG.ecoEnergyData = 'On';
+            const wsOn = createMockWs();
+            ecoenergyApp.sendEcoEnergyState(wsOn);
+            assert.ok(payloadOf(wsOn, 'TotalSavedDistance').DistanceSaved.TotSvdDistance > 0);
+            assert.equal(payloadOf(wsOn, 'CurrEquippedFeature').CurrFeature, 'ISTOP_IELOOP');
+            assert.equal(
+                payloadOf(wsOn, 'iELoopCntrlStatus').iELoop_CntrlStatus.capacitor,
+                'LVL_4'
+            );
+            const barGraph = payloadOf(wsOn, 'CurrDrvEcoPerInstBarGraph').CurrDrvFuelEco_BarGraph
+                .EEM_CurDrvAvgFuelEco;
+            assert.equal(barGraph.length, 15);
+            assert.ok(barGraph[11].Drv1AvlFuelE > 0);
+            assert.equal(barGraph[12].Drv1AvlFuelE, 0);
+
+            settings.HARDWARE_CONFIG.ecoEnergyData = 'Off';
+            const wsOff = createMockWs();
+            ecoenergyApp.sendEcoEnergyState(wsOff);
+            assert.equal(payloadOf(wsOff, 'TotalSavedDistance').DistanceSaved.TotSvdDistance, 0);
+            assert.equal(payloadOf(wsOff, 'CurrEquippedFeature').CurrFeature, 'ISTOP');
+        } finally {
+            settings.HARDWARE_CONFIG.ecoEnergyData = prev;
+        }
     });
 });

@@ -362,4 +362,16 @@ describe('systemApp', () => {
             assert.deepEqual(backStack(), ['ClockTab']);
         });
     });
+
+    describe('CarPlay', () => {
+        it('SelectCarPlay and SelectCarPlayWifi open carplay/DeviceList', () => {
+            const ws = createMockWs();
+            systemApp.events.SelectCarPlay(ws);
+            assert.deepEqual(contextPaths(ws), ['carplay/DeviceList']);
+
+            const wsWifi = createMockWs();
+            systemApp.events.SelectCarPlayWifi(wsWifi);
+            assert.deepEqual(contextPaths(wsWifi), ['carplay/DeviceList']);
+        });
+    });
 });

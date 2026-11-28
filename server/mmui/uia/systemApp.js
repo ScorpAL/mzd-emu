@@ -10,6 +10,10 @@ const settings = require('../services/settings');
 const vehicleEquipment = require('../services/vehicleEquipment');
 const schedmaintApp = require('./schedmaintApp');
 const ecoenergyApp = require('./ecoenergyApp');
+const fmradioApp = require('./fmradioApp');
+const phoneApp = require('./phoneApp');
+const contactsApp = require('./contactsApp');
+const smsApp = require('./smsApp');
 const logger = require('../../logger');
 const coldStart = require('../services/coldStart');
 
@@ -222,8 +226,23 @@ function sendApplicationsState(ws) {
     sendApplicationStatus(ws, 'vsm', false, false);
     sendStatusMenu(ws, 'vehicleStatus', true);
 
-    sendApplicationStatus(ws, 'carplay', true, false);
-    sendApplicationStatus(ws, 'androidauto', true, false);
+    const carplayAvailable =
+        settings.HARDWARE_CONFIG.appleCarPlayAvailable === 'On' ||
+        settings.HARDWARE_CONFIG.appleWirelessCarPlayAvailable === 'On';
+    const carplayConnected =
+        carplayAvailable && settings.HARDWARE_CONFIG.appleCarPlayConnection === 'On';
+    const aaAvailable = settings.HARDWARE_CONFIG.androidAutoAvailable === 'On';
+    const aaConnected = aaAvailable && settings.HARDWARE_CONFIG.androidAutoConnection === 'On';
+
+    sendApplicationStatus(ws, 'carplay', carplayAvailable, carplayConnected);
+    sendApplicationStatus(ws, 'androidauto', aaAvailable, aaConnected);
+    sendRemoteUiStatus(ws, carplayConnected, aaConnected);
+
+    sendApplicationStatus(ws, 'phone', true, true);
+    sendApplicationStatus(ws, 'contacts', true, true);
+    sendApplicationStatus(ws, 'sms', true, true);
+    sendStatusMenu(ws, 'fmradio', true);
+    sendStatusMenu(ws, 'syssettings', true);
 
     sendStitcherState(ws);
 
@@ -265,12 +284,177 @@ function handleSelectConnect(ws) {
     btpairingApp.handleSelectBluetooth(ws);
 }
 
+function sendCommunicationState(ws) {
+    sendApplicationStatus(ws, 'phone', true, true);
+    sendApplicationStatus(ws, 'contacts', true, true);
+    sendApplicationStatus(ws, 'sms', true, true);
+    sendStatusMenu(ws, 'syssettings', true);
+}
+
+function sendRemoteUiStatus(ws, carplayConnected, aaConnected) {
+    // StatusBarCtrl has a single RemoteUI button slot; sending 'Hidden' for an inactive
+    // projection clears an active one, so only emit 'Hidden' when neither is connected.
+    if (carplayConnected) {
+        sendSystemMsg(ws, 'StatusMenuVisibleCarPlay', {
+            appName: 'carplay',
+            state: 'Visible',
+            deviceName: 'iPhone'
+        });
+    } else if (aaConnected) {
+        sendSystemMsg(ws, 'StatusMenuVisibleAndroidAuto', {
+            appName: 'androidauto',
+            state: 'Visible'
+        });
+    } else {
+        sendSystemMsg(ws, 'StatusMenuVisibleCarPlay', {
+            appName: 'carplay',
+            state: 'Hidden',
+            deviceName: 'iPhone'
+        });
+        sendSystemMsg(ws, 'StatusMenuVisibleAndroidAuto', {
+            appName: 'androidauto',
+            state: 'Hidden'
+        });
+    }
+}
+
+function sendEntertainmentState(ws) {
+    const carplayConnected =
+        (settings.HARDWARE_CONFIG.appleCarPlayAvailable === 'On' ||
+            settings.HARDWARE_CONFIG.appleWirelessCarPlayAvailable === 'On') &&
+        settings.HARDWARE_CONFIG.appleCarPlayConnection === 'On';
+    const aaConnected =
+        settings.HARDWARE_CONFIG.androidAutoAvailable === 'On' &&
+        settings.HARDWARE_CONFIG.androidAutoConnection === 'On';
+
+    sendStatusMenu(ws, 'fmradio', true);
+    sendRemoteUiStatus(ws, carplayConnected, aaConnected);
+}
+
 function handleSelectEntertainment(ws) {
+    sendEntertainmentState(ws);
     sendContextChange(ws, 'system', 'Entertainment');
 }
 
 function handleSelectCommunication(ws) {
+    sendCommunicationState(ws);
     sendContextChange(ws, 'system', 'Communication');
+}
+
+function handleSelectRadioFM(ws) {
+    fmradioApp.handleSelectRadioFM(ws);
+}
+
+function handleSelectPhone(ws) {
+    phoneApp.handleSelectPhone(ws);
+}
+
+function handleSelectContacts(ws) {
+    contactsApp.handleSelectContacts(ws);
+}
+
+function handleSelectCallHistory(ws) {
+    phoneApp.handleSelectCallHistory(ws);
+}
+
+function handleSelectSms(ws) {
+    smsApp.handleSelectSms(ws);
+}
+
+function handleSelectActiveCall(ws) {
+    phoneApp.handleSelectActiveCall(ws);
+}
+
+function handleSelectCarPlay(ws) {
+    const carplayConnected =
+        (settings.HARDWARE_CONFIG.appleCarPlayAvailable === 'On' ||
+            settings.HARDWARE_CONFIG.appleWirelessCarPlayAvailable === 'On') &&
+        settings.HARDWARE_CONFIG.appleCarPlayConnection === 'On';
+    if (carplayConnected) {
+        ws.send(
+            JSON.stringify({
+                msgType: 'msg',
+                uiaId: 'carplay',
+                msgId: 'SendDeviceListInfo',
+                params: {
+                    payload: {
+                        devicelistsize: 1,
+                        devicelistInfo: {
+                            CarplayDeviceList: [
+                                {
+                                    clientId: 1,
+                                    friendlyName: 'iPhone',
+                                    connectMode: 1,
+                                    serialId: 'cp-1',
+                                    btMacAddress: '00:11:22:33:44:55',
+                                    isPaired: true
+                                }
+                            ]
+                        }
+                    }
+                }
+            })
+        );
+        ws.send(
+            JSON.stringify({
+                msgType: 'msg',
+                uiaId: 'carplay',
+                msgId: 'SendCPSessionState',
+                params: {
+                    payload: {
+                        state: true,
+                        btMacAddress: '00:11:22:33:44:55',
+                        serialId: 'cp-1'
+                    }
+                }
+            })
+        );
+    } else {
+        ws.send(
+            JSON.stringify({
+                msgType: 'msg',
+                uiaId: 'carplay',
+                msgId: 'SendCPSessionState',
+                params: { payload: { state: false } }
+            })
+        );
+        ws.send(
+            JSON.stringify({
+                msgType: 'msg',
+                uiaId: 'carplay',
+                msgId: 'SendNoneDeviceListInfo',
+                params: { payload: {} }
+            })
+        );
+    }
+    sendContextChange(ws, 'carplay', 'DeviceList');
+}
+
+function handleDisplayOffGUIActivity(ws) {
+    const stack = navigationState.goBackStack;
+    if (stack.length > 0) {
+        const top = stack[stack.length - 1];
+        if (top.uiaId === 'system' && top.ctxtId === 'DisplayOff') {
+            stack.pop();
+        }
+    }
+    if (stack.length > 0) {
+        const context = stack[stack.length - 1];
+        sendContextChange(
+            ws,
+            context.uiaId,
+            context.ctxtId,
+            context.params,
+            context.contextSeq,
+            true
+        );
+    } else {
+        sendContextChange(ws, 'syssettings', 'DisplayTab');
+    }
+}
+
+function sendPhoneCallStatus(ws, phoneCallStatus) {
+    sendSystemMsg(ws, 'StatusPhoneCall', { phoneCallStatus: phoneCallStatus });
 }
 
 // Navigation belongs to the separate emnavi app, which is not emulated.
@@ -278,6 +462,17 @@ function handleSelectNavigation(_ws) {}
 
 // Settings opens directly on the first available tab; there is no system/Settings context.
 function handleSelectSettings(ws) {
+    const stack = navigationState.goBackStack;
+    const top = stack[stack.length - 1];
+    if (top && top.uiaId === 'system' && top.ctxtId === 'Communication') {
+        sendContextChange(ws, 'syssettings', 'CommunicationSettings');
+        return;
+    }
+    if (top && (top.uiaId === 'fmradio' || top.ctxtId === 'NowPlaying')) {
+        audiosettingsApp.sendSoundState(ws);
+        sendContextChange(ws, 'audiosettings', 'SoundTab');
+        return;
+    }
     sendContextChange(ws, getInitialSettingsTabUiaId(), getInitialSettingsTabContextId());
 }
 
@@ -348,7 +543,18 @@ const events = {
     SelectEcoEnergy: (ws) => handleSelectEcoEnergy(ws),
     SelectVehicleStatusMonitor: (ws) => handleSelectVehicleStatusMonitor(ws),
     SelectWarnGuide: (ws) => handleSelectWarnGuide(ws),
-    SelectSchedMaint: (ws) => handleSelectSchedMaint(ws)
+    SelectSchedMaint: (ws) => handleSelectSchedMaint(ws),
+    SelectRadioFM: (ws) => handleSelectRadioFM(ws),
+    SelectPhone: (ws) => handleSelectPhone(ws),
+    SelectContacts: (ws) => handleSelectContacts(ws),
+    SelectCallHistory: (ws) => handleSelectCallHistory(ws),
+    SelectSms: (ws) => handleSelectSms(ws),
+    SelectActiveCall: (ws) => handleSelectActiveCall(ws),
+    SelectCarPlay: (ws) => handleSelectCarPlay(ws),
+    SelectCarPlayWifi: (ws) => handleSelectCarPlay(ws),
+    SelectAppleCarPlay: (ws) => handleSelectCarPlay(ws),
+    DisplayOffGUIActivity: (ws) => handleDisplayOffGUIActivity(ws),
+    DisplayOffNotificationEvent: (ws) => handleDisplayOffGUIActivity(ws)
 };
 
 // Dialogs this application answers for the shared Global.Yes / Global.No, as [flag, handler]
@@ -384,5 +590,13 @@ module.exports = {
     handleSelectCommunication: handleSelectCommunication,
     handleSelectNavigation: handleSelectNavigation,
     handleSelectSettings: handleSelectSettings,
-    handleIntentSettingsTab: handleIntentSettingsTab
+    handleIntentSettingsTab: handleIntentSettingsTab,
+    sendPhoneCallStatus: sendPhoneCallStatus,
+    handleSelectRadioFM: handleSelectRadioFM,
+    handleSelectPhone: handleSelectPhone,
+    handleSelectContacts: handleSelectContacts,
+    handleSelectCallHistory: handleSelectCallHistory,
+    handleSelectSms: handleSelectSms,
+    handleSelectActiveCall: handleSelectActiveCall,
+    handleDisplayOffGUIActivity: handleDisplayOffGUIActivity
 };

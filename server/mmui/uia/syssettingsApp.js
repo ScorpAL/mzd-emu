@@ -3,6 +3,7 @@ const sendContextChange = protocol.sendContextChange;
 const navigationState = require('../state/navigationState');
 const settings = require('../services/settings');
 const temperatureService = require('../services/temperatureService');
+const mockAppsdk = require('../../services/mockAppsdk');
 const logger = require('../../logger');
 
 // Dialog state of this application (what the shared Global.Yes / Global.No answer, see commonApp.js).
@@ -12,7 +13,9 @@ const dialogs = {
     factoryResetConfirmActive: false,
     factoryResetProgressActive: false,
     displayResetConfirmActive: false,
-    displayResetProgressActive: false
+    displayResetProgressActive: false,
+    commResetConfirmActive: false,
+    commResetProgressActive: false
 };
 
 // Stage the selected language until the confirmation dialog is accepted.
@@ -398,16 +401,131 @@ function handleFactoryResetYes(ws) {
     }, 2000);
 }
 
+function handleSelectCommunicationSettings(ws) {
+    sendContextChange(ws, 'syssettings', 'CommunicationSettings');
+}
+
+function handleCommunicationReset(ws) {
+    dialogs.commResetConfirmActive = true;
+    sendContextChange(ws, 'syssettings', 'CommunicationSettingsReset');
+}
+
+function handleCommunicationResetNo(ws) {
+    dialogs.commResetConfirmActive = false;
+    returnToPreviousContext(ws);
+}
+
+function handleCommunicationResetYes(ws) {
+    dialogs.commResetConfirmActive = false;
+    dialogs.commResetProgressActive = true;
+    sendContextChange(
+        ws,
+        'syssettings',
+        'CommunicationSettingsResetProg',
+        undefined,
+        undefined,
+        true
+    );
+    dialogs.commResetProgressActive = false;
+    returnToPreviousContext(ws);
+}
+
+function handleSelectPresetMessages(ws) {
+    sendContextChange(ws, 'syssettings', 'PresetMessages');
+}
+
+function handleSelectComposeMessage(ws) {
+    sendContextChange(ws, 'syssettings', 'ComposeMessage');
+}
+
+function handleSelectDisplayOff(ws) {
+    sendContextChange(ws, 'system', 'DisplayOff', { showClock: false });
+}
+
+function handleSelectDisplayClock(ws) {
+    sendContextChange(ws, 'system', 'DisplayOff', { showClock: true });
+}
+
+function sendSyssettingsMsg(ws, msgId, payload) {
+    const msg = JSON.stringify({
+        msgType: 'msg',
+        uiaId: 'syssettings',
+        msgId: msgId,
+        params: { payload: payload }
+    });
+    ws.send(msg);
+    logger.debug('syssettings', 'Sent message msgId=%s', msgId);
+}
+
+function handleSaveMessage(ws, params) {
+    if (
+        params &&
+        params.payload &&
+        params.payload.messageData &&
+        params.payload.messageData.msgIndex != null &&
+        params.payload.messageData.editedMessage != null
+    ) {
+        const { msgIndex, editedMessage } = params.payload.messageData;
+        mockAppsdk.updatePresetMessage(msgIndex, editedMessage);
+    }
+    sendSyssettingsMsg(ws, 'SaveMessageStatus', { Status: true });
+
+    const currentContext = navigationState.goBackStack[navigationState.goBackStack.length - 1];
+    if (
+        currentContext &&
+        currentContext.uiaId === 'syssettings' &&
+        currentContext.ctxtId === 'ComposeMessage' &&
+        navigationState.goBackStack.length >= 2
+    ) {
+        navigationState.goBackStack.pop();
+        const previousContext = navigationState.goBackStack[navigationState.goBackStack.length - 1];
+        sendContextChange(
+            ws,
+            previousContext.uiaId,
+            previousContext.ctxtId,
+            previousContext.params,
+            previousContext.contextSeq,
+            true
+        );
+    } else {
+        sendContextChange(ws, 'syssettings', 'PresetMessages');
+    }
+}
+
+function handleCancel(ws) {
+    const currentContext = navigationState.goBackStack[navigationState.goBackStack.length - 1];
+    if (
+        !currentContext ||
+        currentContext.uiaId !== 'syssettings' ||
+        currentContext.ctxtId !== 'ComposeMessage' ||
+        navigationState.goBackStack.length < 2
+    ) {
+        return false;
+    }
+
+    navigationState.goBackStack.pop();
+    const previousContext = navigationState.goBackStack[navigationState.goBackStack.length - 1];
+    sendContextChange(
+        ws,
+        previousContext.uiaId,
+        previousContext.ctxtId,
+        previousContext.params,
+        previousContext.contextSeq,
+        true
+    );
+    return true;
+}
+
 // Events of this application (see docs/NATIVE_MAP.md), dispatched by eventId.
 const events = {
     // The firmware context is literally named SelectTimeZone.
     SelectTimeZone: (ws, _params, uiaId) => sendContextChange(ws, uiaId, 'SelectTimeZone'),
-    // These are native commands, not GUI contexts.
-    SelectDisplayOff: () => {},
-    SelectDisplayClock: () => {},
+    SelectDisplayOff: (ws) => handleSelectDisplayOff(ws),
+    SelectDisplayClock: (ws) => handleSelectDisplayClock(ws),
     // These rows are visible but disabled in the vehicle configuration.
     SetAppleCarPlay: (ws) => sendDevicesState(ws),
     SetAndroidAuto: (ws) => sendDevicesState(ws),
+    SelectPresetMessageFromList: (ws) => handleSelectComposeMessage(ws),
     SelectLanguageConf: (ws, params) => handleSelectLanguageConf(ws, params),
     SetLanguage: (ws, params) => handleSetLanguage(ws, params),
     SetTimeFormat: (_ws, params) => handleSetTimeFormat(params),
@@ -424,7 +542,9 @@ const events = {
     SelectChangeLanguage: (ws, _params, uiaId) => handleSelectChangeLanguage(ws, uiaId),
     SelectAgreementsAndDisclaimers: (ws, _params, uiaId) =>
         handleSelectAgreementsAndDisclaimers(ws, uiaId),
-    SelectFactoryReset: (ws, _params, uiaId) => handleSelectFactoryReset(ws, uiaId)
+    SelectFactoryReset: (ws, _params, uiaId) => handleSelectFactoryReset(ws, uiaId),
+    ResetComSettingsConf: (ws) => handleCommunicationReset(ws),
+    SaveMessage: (ws, params) => handleSaveMessage(ws, params)
 };
 
 // Dialogs this application answers for the shared Global.Yes / Global.No, as [flag, handler]
@@ -432,12 +552,14 @@ const events = {
 const dialogAnswers = {
     yes: [
         ['factoryResetConfirmActive', handleFactoryResetYes],
-        ['displayResetConfirmActive', handleDisplayResetYes]
+        ['displayResetConfirmActive', handleDisplayResetYes],
+        ['commResetConfirmActive', handleCommunicationResetYes]
     ],
     no: [
         ['languageConfActive', handleLanguageConfNo],
         ['factoryResetConfirmActive', handleFactoryResetNo],
-        ['displayResetConfirmActive', handleDisplayResetNo]
+        ['displayResetConfirmActive', handleDisplayResetNo],
+        ['commResetConfirmActive', handleCommunicationResetNo]
     ]
 };
 
@@ -449,6 +571,9 @@ function closeDialogsOf(top) {
     }
     if (top.uiaId === 'syssettings' && top.ctxtId === 'FactoryResetConfirm') {
         dialogs.factoryResetConfirmActive = false;
+    }
+    if (top.uiaId === 'syssettings' && top.ctxtId === 'CommunicationSettingsReset') {
+        dialogs.commResetConfirmActive = false;
     }
 }
 
@@ -480,5 +605,15 @@ module.exports = {
     handleSelectAgreementsAndDisclaimers: handleSelectAgreementsAndDisclaimers,
     handleSelectFactoryReset: handleSelectFactoryReset,
     handleFactoryResetNo: handleFactoryResetNo,
-    handleFactoryResetYes: handleFactoryResetYes
+    handleFactoryResetYes: handleFactoryResetYes,
+    handleSelectCommunicationSettings: handleSelectCommunicationSettings,
+    handleCommunicationReset: handleCommunicationReset,
+    handleCommunicationResetNo: handleCommunicationResetNo,
+    handleCommunicationResetYes: handleCommunicationResetYes,
+    handleSelectPresetMessages: handleSelectPresetMessages,
+    handleSelectComposeMessage: handleSelectComposeMessage,
+    handleSaveMessage: handleSaveMessage,
+    handleCancel: handleCancel,
+    handleSelectDisplayOff: handleSelectDisplayOff,
+    handleSelectDisplayClock: handleSelectDisplayClock
 };

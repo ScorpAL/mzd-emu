@@ -5,6 +5,8 @@ const startup = require('./mmui/services/startup');
 const temperatureService = require('./mmui/services/temperatureService');
 const { createControlServer } = require('./mmui/controlPanel');
 const handleMmuiEvent = require('./mmui/dispatcher');
+const mockDbapi = require('./services/mockDbapi');
+const mockAppsdk = require('./services/mockAppsdk');
 
 const runtime = require('./config/runtime.json');
 
@@ -42,6 +44,13 @@ function attachPassiveEndpoint(server, scope) {
             const data = parseMessage(message, scope);
             if (data) {
                 logger.debug(scope, 'Received message type=%s', data.msgType || 'unknown');
+                if (data.msgType === 'method') {
+                    if (scope === 'dbapi') {
+                        mockDbapi.handleMessage(ws, data);
+                    } else if (scope === 'appsdk') {
+                        mockAppsdk.handleMessage(ws, data);
+                    }
+                }
             }
         });
     });
