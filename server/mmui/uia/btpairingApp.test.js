@@ -37,10 +37,22 @@ describe('btpairingApp', () => {
                 assert.equal(list.status, status, bluetooth);
                 assert.deepEqual(list.listItem, []);
                 assert.equal(payloadOf(ws, 'DeviceInfo').DeviceInfoMsg.deviceName, 'Mazda');
-                assert.equal(payloadOf(ws, 'CarPlayConnectionStatus').isCarPlayConnected, 0);
+                const cpConnected =
+                    (settings.HARDWARE_CONFIG.appleCarPlayAvailable === 'On' ||
+                        settings.HARDWARE_CONFIG.appleWirelessCarPlayAvailable === 'On') &&
+                    settings.HARDWARE_CONFIG.appleCarPlayConnection === 'On'
+                        ? 1
+                        : 0;
+                const aaConnected =
+                    settings.HARDWARE_CONFIG.androidAutoAvailable === 'On' &&
+                    settings.HARDWARE_CONFIG.androidAutoConnection === 'On';
+                assert.equal(
+                    payloadOf(ws, 'CarPlayConnectionStatus').isCarPlayConnected,
+                    cpConnected
+                );
                 assert.equal(
                     payloadOf(ws, 'AndroidAutoConnectionStatus').isAndroidAutoConnected,
-                    false
+                    aaConnected
                 );
             }
         });
@@ -142,6 +154,24 @@ describe('btpairingApp', () => {
             assert.equal(btpairingApp.handleCancel(ws), false, 'nothing to go back to');
             assert.deepEqual(backStack(), ['Discoverable'], 'the stack is left alone');
             assert.deepEqual(ws.messages, []);
+        });
+    });
+
+    describe('change pair code', () => {
+        it('ChangePairCode opens ChangePairCode and ChangePairCodeYes updates pairCode', () => {
+            try {
+                setBackStack(['btpairing', 'BluetoothSettings']);
+                const ws = createMockWs();
+                btpairingApp.events.ChangePairCode(ws);
+                assert.deepEqual(contexts(ws), ['ChangePairCode']);
+
+                const wsSave = createMockWs();
+                btpairingApp.events.ChangePairCodeYes(wsSave, { payload: { input: '1234' } });
+                assert.equal(btpairingApp.getPairCode(), '1234');
+                assert.deepEqual(contexts(wsSave), ['BluetoothSettings']);
+            } finally {
+                btpairingApp.setPairCode('0000');
+            }
         });
     });
 });

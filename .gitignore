@@ -1,2 +1,5 @@
 /jci/
 /node_modules/
+/data/
+/etc/
+/tmp/

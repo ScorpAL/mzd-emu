@@ -72,9 +72,24 @@ describe('dispatcher', () => {
             assert.ok(dispatch('syssettings', 'SetAppleCarPlay').messages.length > 0);
         });
 
-        it('SelectDisplayOff and SelectDisplayClock are native no-ops', () => {
-            assert.deepEqual(dispatch('syssettings', 'SelectDisplayOff').messages, []);
-            assert.deepEqual(dispatch('syssettings', 'SelectDisplayClock').messages, []);
+        it('SelectDisplayOff transitions to system/DisplayOff with showClock: false', () => {
+            const messages = dispatch('syssettings', 'SelectDisplayOff').messages;
+            assert.strictEqual(messages.length, 4);
+            assert.strictEqual(messages[0].msgType, 'transition');
+            assert.strictEqual(messages[1].msgType, 'ctxtChg');
+            assert.strictEqual(messages[1].uiaId, 'system');
+            assert.strictEqual(messages[1].ctxtId, 'DisplayOff');
+            assert.strictEqual(messages[1].params.showClock, false);
+        });
+
+        it('SelectDisplayClock transitions to system/DisplayOff with showClock: true', () => {
+            const messages = dispatch('syssettings', 'SelectDisplayClock').messages;
+            assert.strictEqual(messages.length, 4);
+            assert.strictEqual(messages[0].msgType, 'transition');
+            assert.strictEqual(messages[1].msgType, 'ctxtChg');
+            assert.strictEqual(messages[1].uiaId, 'system');
+            assert.strictEqual(messages[1].ctxtId, 'DisplayOff');
+            assert.strictEqual(messages[1].params.showClock, true);
         });
     });
 

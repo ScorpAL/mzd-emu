@@ -47,7 +47,11 @@ const sendContextChange = function (ws, uiaId, ctxtId, params, contextSeq, skipG
             uiaId === 'audiosettings' ||
             uiaId === 'sysupdate' ||
             uiaId === 'btpairing' ||
-            uiaId === 'netmgmt')
+            uiaId === 'netmgmt' ||
+            uiaId === 'phone' ||
+            uiaId === 'contacts' ||
+            uiaId === 'sms' ||
+            uiaId === 'fmradio')
     ) {
         navigationState.goBackStack.push({
             uiaId: uiaId,

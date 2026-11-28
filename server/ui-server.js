@@ -12,6 +12,7 @@ const CONFIG = {
     mounts: [
         // The firmware dump. The GUI uses absolute /jci/... paths, so the prefix is fixed.
         { prefix: '/jci/', dir: path.join(__dirname, '..', 'jci') },
+        { prefix: '/data/', dir: path.join(__dirname, '..', 'data') },
         // Emulator code that runs in the browser.
         { prefix: '/emulator/', dir: path.join(__dirname, '..', 'client') }
     ],
@@ -85,7 +86,22 @@ function clientRuntime() {
 function createServer() {
     return http.createServer(function (req, res) {
         const urlPath = req.url;
-        if (urlPath.split('?')[0] === CONFIG.runtimePath) {
+        const cleanPath = urlPath.split('?')[0];
+        if (cleanPath === '/jci/gui/undefined' || cleanPath.endsWith('/undefined')) {
+            // Stock List2Ctrl sets style.backgroundImage = 'url(undefined)' when loadingConfig is empty.
+            res.writeHead(200, {
+                'Content-Type': MIME_TYPES['.png'],
+                'Cache-Control': 'no-store'
+            });
+            res.end(
+                Buffer.from(
+                    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+                    'base64'
+                )
+            );
+            return;
+        }
+        if (cleanPath === CONFIG.runtimePath) {
             res.writeHead(200, {
                 'Content-Type': MIME_TYPES['.json'],
                 'Cache-Control': 'no-store'

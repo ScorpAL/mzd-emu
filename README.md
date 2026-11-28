@@ -107,11 +107,14 @@ change a port.
 ### Vehicle profile
 
 [`server/config/vehicle.json`](server/config/vehicle.json) describes the
-virtual car itself: region, vehicle model, HUD type, and which hardware
+virtual car itself: region, vehicle model, HUD type, which hardware
 features are fitted (navigation SD card, Bose audio, Apple CarPlay, Android
-Auto). This is fixed vehicle identity, not something the driver changes from
-the UI — edit it to simulate a different market or equipment level, then
-restart the servers.
+Auto, Bluetooth phone link), and whether mocked apps populate sample data or
+empty states (`fmRadioData`, `contactsData`, `contactAvatars`, `callHistoryData`,
+`smsData`, `wifiNetworks`, `ecoEnergyData`). This is fixed vehicle identity and
+data configuration, not something the driver changes from the UI — edit it to
+simulate a different market, equipment level, or empty-list state, then restart
+the servers.
 
 ### User settings
 
@@ -160,11 +163,16 @@ on the screen, not every message on the wire:
     - `uia/` has one handler per application, named after the firmware `uiaId`
       values from `jci/mmui/mmui_config.xml` (`system`, `syssettings`,
       `vehsettings`, `audiosettings`, `btpairing`, `netmgmt`, `sysupdate`,
-      `schedmaint`, `ecoenergy`), plus `commonApp.js` for the shared `Global.*`
-      events. Each exports an `events` table that `dispatcher.js` looks up.
+      `schedmaint`, `ecoenergy`, `fmradio`, `phone`, `contacts`, `sms`), plus
+      `commonApp.js` for the shared `Global.*` events. Each exports an `events`
+      table that `dispatcher.js` looks up.
     - `services/` holds what the firmware does in separate services: settings,
       vehicle configuration, temperature, the cold-start clock.
     - `state/` keeps the navigation (go-back) stack.
+- `server/services/` holds the mock transport responders for `dbapi`
+  (`mockDbapi.js`) and `appsdk` (`mockAppsdk.js`), serving seeded contacts
+  (with deterministic SVG avatars), call history, FM stations, and SMS/preset
+  messages.
 - Tests sit next to the code they test (`systemApp.test.js` beside `systemApp.js`);
   shared test helpers are in `testing/`: `state.js` (`useCleanState()` puts the
   MMUI state back after every test), `mockWs.js` (a fake GUI socket and queries on
@@ -185,8 +193,43 @@ combined HTML in the HTTP response — the original file on disk is untouched.
 (shims) for old browser APIs the firmware's Presto-era JavaScript relies on,
 so that unmodified GUI code can run in a modern browser like Chrome.
 
-`ui-server.js` serves only `jci/` (at `/jci/`) and `client/` (at `/emulator/`); every
+`ui-server.js` serves `jci/` (at `/jci/`), `data/` (at `/data/`), and `client/`
+(at `/emulator/`), and returns a 1×1 transparent PNG for `/undefined` image
+requests emitted by stock list controls when `loadingConfig` is empty. Every
 other path, including the server code, settings and `.git`, answers 404.
+
+## Emulated apps and features
+
+- **FM Radio (`fmradio`):** Now Playing, Tune, Station List, Auto Memory, and
+  Settings screens with frequency stepping, preset seeking, and RDS/metadata
+  status (`fmRadioData`).
+- **Phone & Call History (`phone`):** Dial Pad, Recent Calls (All/Missed tabs,
+  tap entry to call), Active Call (with matched contact name and persistent
+  avatar), DTMF keypad, Mute, and Hang up.
+- **Contacts (`contacts`):** Alphabetically indexed contact list, Edit Contacts,
+  Contact Details (tap a number to start a call, Remove Contact confirmation),
+  and auto-generated SVG contact faces with placeholder fallback
+  (`contactsData`, `contactAvatars`).
+- **Text Messages (`sms`):** SMS Inbox, Message Detail (Reply, Call sender,
+  Delete confirmation), and Preset Messages (including editing and saving preset
+  replies under Communication Settings).
+- **Communication & Bluetooth Settings (`syssettings`, `btpairing`):**
+  Communication Settings Reset modal (`CommunicationSettingsReset`) and
+  Bluetooth pairing code change (`ChangePairCode`).
+- **Apple CarPlay & Android Auto (`system`, `btpairing`):** Availability,
+  connection state, HomeScreen status-bar RemoteUI icon, and CarPlay
+  `DeviceList` screen driven by `vehicle.json`.
+- **Wi-Fi (`netmgmt`):** Seeded scanned and remembered SSIDs (`wifiNetworks`),
+  automatic `NetworkOptionsStation` / `NetworkOptionsOffAP` switching for
+  Wireless CarPlay, and `OtherNetwork` SSID + Security Type entry.
+- **EcoEnergy (`ecoenergy`):** i-stop, i-ELOOP charging/discharging animation,
+  Cylinder Deactivation status, 30-minute current-drive fuel chart, and
+  past-days cumulative fuel history (`ecoEnergyData`).
+- **Display Off (`syssettings`, `system`):** Turn Display Off action and wake on
+  user interaction.
+- **Quick navigation (`client/ui-controls.js`):** Side-panel screen shortcuts,
+  simulated incoming/active call controls, and `?screen=<id>` URL parameter
+  support (e.g. `?screen=contacts`, `?screen=fmradio`, `?screen=dialpad`).
 
 ## Checks and formatting
 

@@ -4,6 +4,8 @@ const settings = require('../services/settings');
 const navigationState = require('../state/navigationState');
 const logger = require('../../logger');
 
+let pairCode = '0000';
+
 function sendMsg(ws, msgId, payload) {
     const msg = JSON.stringify({
         msgType: 'msg',
@@ -30,11 +32,18 @@ function sendBluetoothState(ws) {
         DeviceInfoMsg: {
             deviceName: 'Mazda',
             deviceAddress: '00:00:00:00:00:00',
-            pairCode: '0000'
+            pairCode: pairCode
         }
     });
-    sendMsg(ws, 'CarPlayConnectionStatus', { isCarPlayConnected: 0 });
-    sendMsg(ws, 'AndroidAutoConnectionStatus', { isAndroidAutoConnected: false });
+    const cpConnected =
+        (settings.HARDWARE_CONFIG.appleCarPlayAvailable === 'On' ||
+            settings.HARDWARE_CONFIG.appleWirelessCarPlayAvailable === 'On') &&
+        settings.HARDWARE_CONFIG.appleCarPlayConnection === 'On';
+    const aaConnected =
+        settings.HARDWARE_CONFIG.androidAutoAvailable === 'On' &&
+        settings.HARDWARE_CONFIG.androidAutoConnection === 'On';
+    sendMsg(ws, 'CarPlayConnectionStatus', { isCarPlayConnected: cpConnected ? 1 : 0 });
+    sendMsg(ws, 'AndroidAutoConnectionStatus', { isAndroidAutoConnected: aaConnected });
 }
 
 function handleSelectBluetooth(ws) {
@@ -56,6 +65,30 @@ function handleToggleBluetooth(ws, enabled) {
 function handleAddNewDevice(ws) {
     sendBluetoothState(ws);
     sendContextChange(ws, 'btpairing', 'Discoverable');
+}
+
+function handleChangePairCode(ws) {
+    sendContextChange(ws, 'btpairing', 'ChangePairCode');
+}
+
+function handleChangePairCodeYes(ws, params) {
+    if (params && params.payload && params.payload.input) {
+        pairCode = String(params.payload.input);
+    }
+    sendBluetoothState(ws);
+    const stack = navigationState.goBackStack;
+    if (
+        stack.length > 0 &&
+        stack[stack.length - 1].uiaId === 'btpairing' &&
+        stack[stack.length - 1].ctxtId === 'ChangePairCode'
+    ) {
+        stack.pop();
+    }
+    const alreadySettings =
+        stack.length > 0 &&
+        stack[stack.length - 1].uiaId === 'btpairing' &&
+        stack[stack.length - 1].ctxtId === 'BluetoothSettings';
+    sendContextChange(ws, 'btpairing', 'BluetoothSettings', undefined, undefined, alreadySettings);
 }
 
 function handleCancel(ws) {
@@ -144,7 +177,9 @@ const events = {
     SelectBluetoothSettings: (ws) => handleSelectBluetoothSettings(ws),
     ToggleBluetoothOn: (ws) => handleToggleBluetooth(ws, true),
     ToggleBluetoothOff: (ws) => handleToggleBluetooth(ws, false),
-    AddNewDevice: (ws) => handleAddNewDevice(ws)
+    AddNewDevice: (ws) => handleAddNewDevice(ws),
+    ChangePairCode: (ws) => handleChangePairCode(ws),
+    ChangePairCodeYes: (ws, params) => handleChangePairCodeYes(ws, params)
 };
 
 module.exports = {
@@ -155,5 +190,11 @@ module.exports = {
     handleSelectBluetoothSettings: handleSelectBluetoothSettings,
     handleToggleBluetooth: handleToggleBluetooth,
     handleAddNewDevice: handleAddNewDevice,
-    handleCancel: handleCancel
+    handleChangePairCode: handleChangePairCode,
+    handleChangePairCodeYes: handleChangePairCodeYes,
+    handleCancel: handleCancel,
+    getPairCode: () => pairCode,
+    setPairCode: (code) => {
+        pairCode = String(code);
+    }
 };

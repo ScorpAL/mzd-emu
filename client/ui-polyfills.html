@@ -269,3 +269,146 @@
         }
     })();
 </script>
+
+<!-- OffScreenCtrl: configure showClock based on context parameters. -->
+<script>
+    (function () {
+        function patchOffScreenCtrl() {
+            if (typeof OffScreenCtrl === 'undefined' || !OffScreenCtrl.prototype._createStructure) {
+                return false;
+            }
+
+            if (OffScreenCtrl.prototype._createStructure.__mzdDisplayOffPatched) {
+                return true;
+            }
+
+            const originalCreateStructure = OffScreenCtrl.prototype._createStructure;
+            const originalUpdateClock = OffScreenCtrl.prototype.updateClock;
+
+            OffScreenCtrl.prototype._createStructure = function () {
+                const fw = window.framework;
+                const sysApp = fw && fw._appInstances && fw._appInstances.system;
+                const currCtxt = sysApp && sysApp.getCurrentContext && sysApp.getCurrentContext();
+                if (currCtxt && currCtxt.ctxtId === 'DisplayOff') {
+                    const params = currCtxt.params;
+                    if (params) {
+                        if (params.showClock !== undefined) {
+                            this.properties.showClock = Boolean(params.showClock);
+                        } else if (params.payload && params.payload.showClock !== undefined) {
+                            this.properties.showClock = Boolean(params.payload.showClock);
+                        }
+                    }
+                }
+                return originalCreateStructure.apply(this, arguments);
+            };
+
+            OffScreenCtrl.prototype.updateClock = function () {
+                if (this.properties && this.properties.showClock && this._clock) {
+                    const fw = window.framework;
+                    const clock =
+                        fw && fw.common && fw.common.statusBar && fw.common.statusBar.clock;
+                    if (clock) {
+                        this._clock.innerHTML = clock.innerHTML;
+                        return;
+                    }
+                }
+                if (originalUpdateClock) {
+                    try {
+                        originalUpdateClock.apply(this, arguments);
+                    } catch (e) {
+                        // ignore if status bar clock element is not yet created
+                    }
+                }
+            };
+
+            OffScreenCtrl.prototype._createStructure.__mzdDisplayOffPatched = true;
+            return true;
+        }
+
+        if (!patchOffScreenCtrl()) {
+            if (
+                typeof GuiFramework !== 'undefined' &&
+                GuiFramework.prototype &&
+                GuiFramework.prototype.registerCtrlLoaded &&
+                !GuiFramework.prototype.registerCtrlLoaded.__mzdOffScreenHooked
+            ) {
+                const origRegisterCtrlLoaded = GuiFramework.prototype.registerCtrlLoaded;
+                GuiFramework.prototype.registerCtrlLoaded = function (controlName) {
+                    if (controlName === 'OffScreenCtrl') {
+                        patchOffScreenCtrl();
+                    }
+                    return origRegisterCtrlLoaded.apply(this, arguments);
+                };
+                GuiFramework.prototype.registerCtrlLoaded.__mzdOffScreenHooked = true;
+            } else {
+                const pollId = setInterval(function () {
+                    if (patchOffScreenCtrl()) {
+                        clearInterval(pollId);
+                    }
+                }, 50);
+            }
+        }
+    })();
+</script>
+
+<!-- FMRadio StationList: ensure station list is requested from DBAPI if not yet loaded. -->
+<script>
+    (function () {
+        function patchFmRadioStationList() {
+            if (
+                typeof fmradioApp === 'undefined' ||
+                !fmradioApp.prototype._StationListCtxtTmpltReadyToDisplay
+            ) {
+                return false;
+            }
+
+            if (fmradioApp.prototype._StationListCtxtTmpltReadyToDisplay.__mzdStationListPatched) {
+                return true;
+            }
+
+            var originalReady = fmradioApp.prototype._StationListCtxtTmpltReadyToDisplay;
+
+            fmradioApp.prototype._StationListCtxtTmpltReadyToDisplay = function (params) {
+                originalReady.apply(this, arguments);
+
+                if (
+                    this._currentContextTemplate &&
+                    this._currentContextTemplate.list2Ctrl &&
+                    !this._currentContextTemplate.list2Ctrl.hasDataList()
+                ) {
+                    var offset = Math.max(
+                        this._contextTable['StationList']['controlProperties']['List2Ctrl'][
+                            'scrollTo'
+                        ] - 10,
+                        0
+                    );
+                    this._listNeedDataOffsetIndex = offset;
+                    var req = {
+                        genre: this._ptyGenreFormat,
+                        region: this._region,
+                        index: this._listNeedDataOffsetIndex,
+                        limit: 20
+                    };
+                    framework.sendRequestToDbapi(
+                        this.uiaId,
+                        this._addItemsToList.bind(this),
+                        'radio',
+                        'FmStationList',
+                        req
+                    );
+                }
+            };
+
+            fmradioApp.prototype._StationListCtxtTmpltReadyToDisplay.__mzdStationListPatched = true;
+            return true;
+        }
+
+        if (!patchFmRadioStationList()) {
+            var pollId = setInterval(function () {
+                if (patchFmRadioStationList()) {
+                    clearInterval(pollId);
+                }
+            }, 50);
+        }
+    })();
+</script>
