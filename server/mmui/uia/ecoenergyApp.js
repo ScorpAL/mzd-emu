@@ -1,9 +1,15 @@
 const protocol = require('../protocol');
 const sendContextChange = protocol.sendContextChange;
 const navigationState = require('../state/navigationState');
+const settings = require('../services/settings');
 const logger = require('../../logger');
 
 const PAGE_SEQUENCE = ['ControlStatus', 'Effectiveness', 'FuelConsumption'];
+// Youngest-first order: indices 0..9 = 0..10 min, 10..11 = 10..30 min (past 30 min), 12..14 = 30..60 min (0).
+// Values are in tenths of L/100km (GUI multiplies by 0.1).
+const SAMPLE_CURRENT_DRIVE_GRAPH = [81, 90, 66, 108, 111, 125, 118, 96, 84, 78, 82, 75, 0, 0, 0];
+// Past 5 days in tenths of L/100km (6, 5, 4, 3, 2 days ago).
+const SAMPLE_CUMULATIVE_GRAPH = [86, 89, 132, 84, 76];
 
 function sendMsg(ws, msgId, payload) {
     const msg = JSON.stringify({
@@ -17,21 +23,32 @@ function sendMsg(ws, msgId, payload) {
 }
 
 function sendEcoEnergyState(ws) {
+    const hasData = settings.HARDWARE_CONFIG.ecoEnergyData === 'On';
     sendMsg(ws, 'FuelType', { FuelType: 'GAS' });
 
-    // The user's EU vehicle shows i-stop only: no i-ELOOP and no mHybrid pages.
-    sendMsg(ws, 'CurrEquippedFeature', { CurrFeature: 'ISTOP' });
+    sendMsg(ws, 'CurrEquippedFeature', { CurrFeature: hasData ? 'ISTOP_IELOOP' : 'ISTOP' });
     sendMsg(ws, 'CurrAvgDriveFuelEco', {
         CurrentAvgFuelEco: {
-            CurdrvAvlFuel: { Drv1AvlFuelE: 0 },
+            CurdrvAvlFuel: { Drv1AvlFuelE: hasData ? 81 : 0 },
             CurdrvAvlFuel_unit: 'L100KM'
         }
     });
     sendMsg(ws, 'CumulativeAvgFuelEconomy', {
         CumulativeAvgFuelEco: {
-            cntrlstat_fuelEff: { cumlAvgEfficiency: 0 },
+            cntrlstat_fuelEff: { cumlAvgEfficiency: hasData ? 81 : 0 },
             cumlEff_unit: 'L100KM'
         }
+    });
+
+    sendMsg(ws, 'iELoopCntrlStatus', {
+        iELoop_CntrlStatus: {
+            capacitor: hasData ? 'LVL_4' : 'LVL_0',
+            motor_generator: hasData ? 'LEVEL5' : 'NO',
+            CapToElc_B_Actl: hasData ? 'YES' : 'NO'
+        }
+    });
+    sendMsg(ws, 'CylinderDeactivation', {
+        CylinderStatus: hasData ? '2_4' : 'NONE'
     });
 
     sendMsg(ws, 'iStopModeCntrlStatus', { iStop_ModeStatus: 'STATUS' });
@@ -45,59 +62,70 @@ function sendEcoEnergyState(ws) {
     });
     sendMsg(ws, 'iStopTimeCntrlStatus', {
         iStop_TimeStatus: {
-            iStop_timeIG: 0,
-            iStopTotalTime: 0
+            iStop_timeIG: hasData ? 185 : 0,
+            iStopTotalTime: hasData ? 1420 : 0
         }
     });
 
     sendMsg(ws, 'iStopEffectiveRate', {
-        iStop_EffectiveRate: { iStop_effective_rate: 0 }
+        iStop_EffectiveRate: { iStop_effective_rate: hasData ? 44 : 0 }
+    });
+    sendMsg(ws, 'iELoopEffectiveRate', {
+        iELoop_EffectiveRate: { iEloopEffectiveRate: hasData ? 38 : 0 }
+    });
+    sendMsg(ws, 'iELoopEffectiveData', {
+        iEloop_EffectiveData: {
+            effectiveness_RgnPwrTotal: { RgnPwrTotal: hasData ? 145 : 0 },
+            effectiveness_ElecLoadTotal: { ElecLoadTotal: hasData ? 112 : 0 },
+            RegnPowr_unit: 'WH',
+            ElecLoad_unit: 'WH'
+        }
     });
     sendMsg(ws, 'iStopEffectiveTimeData', {
         iStop_EffectiveTime: {
             effectiveness_iStop_time: {
-                iStop_timeIG: 0,
-                iStopTotalTime: 0
+                iStop_timeIG: hasData ? 185 : 0,
+                iStopTotalTime: hasData ? 1420 : 0
             },
-            effectiveness_TotStpTime: { tot_time_veh_stopped: 0 }
+            effectiveness_TotStpTime: { tot_time_veh_stopped: hasData ? 420 : 0 }
         }
     });
     sendMsg(ws, 'TotalSavedDistance', {
         DistanceSaved: {
-            TotSvdDistance: 0,
+            TotSvdDistance: hasData ? 12.6 : 0,
             TotSvdDistance_unit: 'KM'
         }
     });
     sendMsg(ws, 'TreeData', {
-        LeavesIcon_growth: 0,
-        TreeGrowth: { TreeIcon_growth: 0 }
+        LeavesIcon_growth: hasData ? 4 : 0,
+        TreeGrowth: { TreeIcon_growth: hasData ? 3 : 0 }
     });
 
     sendMsg(ws, 'CurrDrvEcoPerInstBarGraph', {
         CurrDrvFuelEco_BarGraph: {
-            EEM_CurDrvAvgFuelEco: createCurrentDriveGraph()
+            EEM_CurDrvAvgFuelEco: createCurrentDriveGraph(hasData)
         }
     });
     sendMsg(ws, 'CumFuelResetEcoGraphData', {
         CumFuelResetEcoGraph: {
-            EEM_cumAvgFuelEffAfterReset: createCumulativeGraph()
+            EEM_cumAvgFuelEffAfterReset: createCumulativeGraph(hasData)
         }
     });
     sendMsg(ws, 'ResetButtonEnabled', { ResetButton: 'ENABLED' });
 }
 
-function createCurrentDriveGraph() {
+function createCurrentDriveGraph(hasData) {
     const values = [];
-    for (let i = 0; i < 20; i += 1) {
-        values.push({ Drv1AvlFuelE: 0 });
+    for (let i = 0; i < SAMPLE_CURRENT_DRIVE_GRAPH.length; i += 1) {
+        values.push({ Drv1AvlFuelE: hasData ? SAMPLE_CURRENT_DRIVE_GRAPH[i] : 0 });
     }
     return values;
 }
 
-function createCumulativeGraph() {
+function createCumulativeGraph(hasData) {
     const values = [];
     for (let i = 0; i < 5; i += 1) {
-        values.push({ cumlAvgEfficiency: 0 });
+        values.push({ cumlAvgEfficiency: hasData ? SAMPLE_CUMULATIVE_GRAPH[i] : 0 });
     }
     return values;
 }

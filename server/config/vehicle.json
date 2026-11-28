@@ -12,5 +12,12 @@
     "appleCarPlaySettings": "Off",
     "androidAutoAvailable": "On",
     "androidAutoConnection": "Off",
-    "androidAutoSettings": "Off"
+    "androidAutoSettings": "Off",
+    "fmRadioData": "Off",
+    "contactsData": "Off",
+    "contactAvatars": "Off",
+    "callHistoryData": "Off",
+    "smsData": "Off",
+    "wifiNetworks": "Off",
+    "ecoEnergyData": "Off"
 }

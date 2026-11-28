@@ -116,6 +116,16 @@ describe('syssettingsApp', () => {
             assert.deepEqual(backStack(), ['DisplayTab']);
             assert.equal(current.displayBrightness, 9);
         });
+
+        it('SelectDisplayOff and SelectDisplayClock transition to system/DisplayOff', () => {
+            const ws1 = createMockWs();
+            app.handleSelectDisplayOff(ws1);
+            assert.deepEqual(contexts(ws1), ['DisplayOff']);
+
+            const ws2 = createMockWs();
+            app.handleSelectDisplayClock(ws2);
+            assert.deepEqual(contexts(ws2), ['DisplayOff']);
+        });
     });
 
     describe('clock and devices', () => {
@@ -171,6 +181,64 @@ describe('syssettingsApp', () => {
             assert.equal(dialogs.factoryResetProgressActive, false);
             assert.deepEqual(backStack(), ['SystemTab']);
             assert.equal(current.timeFormat, 'hrs24');
+        });
+    });
+
+    describe('preset messages', () => {
+        it('handleSelectComposeMessage lands on ComposeMessage context', () => {
+            const ws = createMockWs();
+            app.handleSelectComposeMessage(ws);
+            assert.deepEqual(contexts(ws), ['ComposeMessage']);
+        });
+
+        it('handleCancel pops ComposeMessage and returns to PresetMessages', () => {
+            setBackStack(['syssettings', 'PresetMessages'], ['syssettings', 'ComposeMessage']);
+            const ws = createMockWs();
+            const handled = app.handleCancel(ws);
+            assert.equal(handled, true);
+            assert.deepEqual(backStack(), ['PresetMessages']);
+            assert.deepEqual(contexts(ws), ['PresetMessages']);
+        });
+
+        it('handleSaveMessage updates preset message, emits SaveMessageStatus, and returns to PresetMessages', () => {
+            setBackStack(['syssettings', 'PresetMessages'], ['syssettings', 'ComposeMessage']);
+            const ws = createMockWs();
+            app.handleSaveMessage(ws, {
+                payload: {
+                    messageData: {
+                        msgIndex: 1,
+                        editedMessage: 'I will be there in 10 minutes.'
+                    }
+                }
+            });
+            assert.deepEqual(backStack(), ['PresetMessages']);
+            assert.deepEqual(contexts(ws), ['PresetMessages']);
+            assert.ok(msgIds(ws).includes('SaveMessageStatus'));
+
+            const statusMsg = ws.messages.find((m) => m.msgId === 'SaveMessageStatus');
+            assert.equal(statusMsg.params.payload.Status, true);
+        });
+
+        it('ResetComSettingsConf opens CommunicationSettingsReset and confirms/cancels', () => {
+            setBackStack(['syssettings', 'CommunicationSettings']);
+            const ws = createMockWs();
+            app.events.ResetComSettingsConf(ws);
+            assert.equal(app.dialogs.commResetConfirmActive, true);
+            assert.deepEqual(contexts(ws), ['CommunicationSettingsReset']);
+
+            const wsNo = createMockWs();
+            app.handleCommunicationResetNo(wsNo);
+            assert.equal(app.dialogs.commResetConfirmActive, false);
+            assert.deepEqual(contexts(wsNo), ['CommunicationSettings']);
+
+            app.events.ResetComSettingsConf(createMockWs());
+            const wsYes = createMockWs();
+            app.handleCommunicationResetYes(wsYes);
+            assert.equal(app.dialogs.commResetConfirmActive, false);
+            assert.deepEqual(contexts(wsYes), [
+                'CommunicationSettingsResetProg',
+                'CommunicationSettings'
+            ]);
         });
     });
 });

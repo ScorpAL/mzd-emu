@@ -73,6 +73,9 @@ function handleCancel(ws, _params, uiaId) {
     if (btpairingApp.handleCancel(ws)) {
         return;
     }
+    if (syssettingsApp.handleCancel && syssettingsApp.handleCancel(ws)) {
+        return;
+    }
     if (sysupdateApp.dialogs.musicDBUpdateActive && isCommon(uiaId)) {
         sysupdateApp.handleMusicDBUpdateClose(ws);
     } else if ((uiaId === 'ecoenergy' || isCommon(uiaId)) && ecoenergyApp.isResetConfirmActive()) {

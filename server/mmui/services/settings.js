@@ -88,6 +88,13 @@ requireAllowedValue('appleCarPlaySettings', VEHICLE_CONFIG.appleCarPlaySettings,
 requireAllowedValue('androidAutoAvailable', VEHICLE_CONFIG.androidAutoAvailable, ['On', 'Off']);
 requireAllowedValue('androidAutoConnection', VEHICLE_CONFIG.androidAutoConnection, ['On', 'Off']);
 requireAllowedValue('androidAutoSettings', VEHICLE_CONFIG.androidAutoSettings, ['On', 'Off']);
+requireAllowedValue('fmRadioData', VEHICLE_CONFIG.fmRadioData, ['On', 'Off']);
+requireAllowedValue('contactsData', VEHICLE_CONFIG.contactsData, ['On', 'Off']);
+requireAllowedValue('contactAvatars', VEHICLE_CONFIG.contactAvatars, ['On', 'Off']);
+requireAllowedValue('callHistoryData', VEHICLE_CONFIG.callHistoryData, ['On', 'Off']);
+requireAllowedValue('smsData', VEHICLE_CONFIG.smsData, ['On', 'Off']);
+requireAllowedValue('wifiNetworks', VEHICLE_CONFIG.wifiNetworks, ['On', 'Off']);
+requireAllowedValue('ecoEnergyData', VEHICLE_CONFIG.ecoEnergyData, ['On', 'Off']);
 
 // Under `node --test` the test files run in parallel processes, and many of them save
 // settings. Each process therefore gets its own file in the temp directory, so the tests
@@ -546,7 +553,14 @@ const HARDWARE_CONFIG = {
     appleCarPlaySettings: VEHICLE_CONFIG.appleCarPlaySettings,
     androidAutoAvailable: VEHICLE_CONFIG.androidAutoAvailable,
     androidAutoConnection: VEHICLE_CONFIG.androidAutoConnection,
-    androidAutoSettings: VEHICLE_CONFIG.androidAutoSettings
+    androidAutoSettings: VEHICLE_CONFIG.androidAutoSettings,
+    fmRadioData: VEHICLE_CONFIG.fmRadioData,
+    contactsData: VEHICLE_CONFIG.contactsData,
+    contactAvatars: VEHICLE_CONFIG.contactAvatars,
+    callHistoryData: VEHICLE_CONFIG.callHistoryData,
+    smsData: VEHICLE_CONFIG.smsData,
+    wifiNetworks: VEHICLE_CONFIG.wifiNetworks,
+    ecoEnergyData: VEHICLE_CONFIG.ecoEnergyData
 };
 
 // Tracks which language the GUI currently believes is active (as a "LANGS_XX_..." ID,

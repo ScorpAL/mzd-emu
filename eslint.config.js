@@ -4,7 +4,13 @@ const prettier = require('eslint-config-prettier');
 
 module.exports = [
     {
-        ignores: ['jci/**', 'node_modules/**', 'server/data/user-settings.json']
+        ignores: [
+            'jci/**',
+            'node_modules/**',
+            'server/data/user-settings.json',
+            'data/integration/**',
+            'tmp/**'
+        ]
     },
     js.configs.recommended,
     {
